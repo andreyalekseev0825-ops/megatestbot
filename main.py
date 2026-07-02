@@ -7,11 +7,19 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
+# Попытка импортировать Pollinations (если не установлен — будет тупой режим)
+try:
+    import pollinations
+    POLLINATIONS_AVAILABLE = True
+except ImportError:
+    POLLINATIONS_AVAILABLE = False
+    print("⚠️ Pollinations не установлен. Используется тупой режим.")
+
 # --- КОНФИГ ---
-BOT_TOKEN = "8798378718:AAGRxt_IwUR0m8a2M97l-5TPn8PhWpcNL9s"
+BOT_TOKEN = "8637399765:AAEM-WJizcYZ2kYIrQoNKJovAXZdTgNYNMU"
 DB_NAME = 'quiz_data.db'
 LEARN_DB_NAME = 'learned_quizzes.db'
-CHANNEL_ID = "@trassa993"
+CHANNEL_ID = "@trassa993"  # Замени на свой канал
 IMAGES_FOLDER = "images/"
 
 # --- БАЗА ДЛЯ ВОПРОСОВ (инфо-канал) ---
@@ -60,7 +68,6 @@ def get_all_questions_with_hashtags():
     return result
 
 def get_all_questions():
-    """Просто список всех вопросов (без хэштегов)"""
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('SELECT questions FROM posts ORDER BY date DESC')
@@ -119,14 +126,55 @@ def get_learned_quizzes():
     return result
 
 # --- ЛОГИКА ВОПРОСОВ ---
+def generate_questions_with_pollinations(text):
+    """Генерирует вопросы через Pollinations AI (если доступен)"""
+    if not POLLINATIONS_AVAILABLE:
+        return None
+    
+    try:
+        client = pollinations.Pollinations()
+        response = client.generate_text(
+            f"Прочитай следующий текст и составь 3 вопроса для викторины. Вопросы должны быть чёткими, на русском языке и иметь один правильный ответ. Текст: {text}",
+            model="openai",
+            temperature=0.7
+        )
+        return response
+    except Exception as e:
+        print(f"Ошибка при генерации через Pollinations: {e}")
+        return None
+
+def generate_dumb_question(text, mode="character", anchors=None):
+    """Генерирует 'тупой' вопрос (запасной вариант)"""
+    anchors = anchors or []
+    
+    for anchor in anchors:
+        if re.search(r'[А-ЯЁ][а-яё]+', anchor):
+            return f"Как зовут персонажа {anchor}?"
+        elif re.search(r'\d+', anchor):
+            return f"Сколько было {anchor}?"
+    
+    names = re.findall(r'\b([А-ЯЁ][а-яё]+)\b', text)
+    numbers = re.findall(r'\b(\d+)\b', text)
+    places = re.findall(r'(?:в|на|из|под|над)\s+([А-ЯЁ][а-яё]+)', text)
+    
+    if mode == "character" and names:
+        return f"Как зовут персонажа {names[0]}?"
+    elif mode == "number" and numbers:
+        return f"Сколько было {numbers[0]}?"
+    elif mode == "place" and places:
+        return f"Где находится {places[0]}?"
+    else:
+        return "О чём этот текст?"
+
 def extract_questions(text, anchors=None, fallback_mode="character"):
+    """Извлекает вопросы из текста, используя Pollinations как запасной вариант"""
     if anchors is None:
         anchors = []
     
     text = text or ""
     hashtags = re.findall(r'#\w+', text)
     
-    # Уровень 0: Вопросы рядом с якорями
+    # --- Уровень 0: Вопросы рядом с якорями ---
     anchor_questions = []
     for anchor in anchors:
         pattern = r'[^.!?]*' + re.escape(anchor) + r'[^.!?]*\?'
@@ -136,7 +184,7 @@ def extract_questions(text, anchors=None, fallback_mode="character"):
     if anchor_questions:
         return list(dict.fromkeys(anchor_questions))[:5], hashtags
     
-    # Уровень 1: Обычные вопросы
+    # --- Уровень 1: Обычные вопросы ---
     question_patterns = [
         r'[А-Яа-яA-Za-z0-9 ,\-\(\)"]+\?',
         r'(Кто|Что|Где|Когда|Куда|Откуда|Почему|Зачем|Как|Сколько|Какие?|Чей)\s+[^.!?]+\?',
@@ -150,29 +198,31 @@ def extract_questions(text, anchors=None, fallback_mode="character"):
     if found:
         return list(dict.fromkeys(found))[:5], hashtags
     
-    # Уровень 2: Тупой вопрос
-    return [generate_dumb_question(text, fallback_mode, anchors)], hashtags
+    # --- Уровень 2: Генерация через AI (если доступен) ---
+    if POLLINATIONS_AVAILABLE:
+        ai_questions = generate_questions_with_pollinations(text)
+        if ai_questions:
+            # Разбиваем на отдельные вопросы (по строкам или по номерам)
+            lines = ai_questions.split('\n')
+            questions_list = []
+            for line in lines:
+                line = line.strip()
+                if line and '?' in line:
+                    # Убираем цифры в начале (1. 2. 3.)
+                    clean_line = re.sub(r'^\d+[\.\)]\s*', '', line)
+                    questions_list.append(clean_line)
+            
+            if questions_list:
+                return questions_list[:5], hashtags
+            else:
+                # Если не нашло вопросов со знаком ?, но есть текст
+                return [ai_questions[:200]], hashtags  # обрезаем длинные ответы
+    
+    # --- Уровень 3: "Тупой" вопрос (запасной) ---
+    dumb_questions = generate_dumb_question(text, fallback_mode, anchors)
+    return [dumb_questions], hashtags
 
-def generate_dumb_question(text, mode="character", anchors=None):
-    anchors = anchors or []
-    
-    for anchor in anchors:
-        if re.search(r'[А-ЯЁ][а-яё]+', anchor):
-            return f"Как зовут персонажа {anchor}?"
-        elif re.search(r'\d+', anchor):
-            return f"Сколько было {anchor}?"
-    
-    names = re.findall(r'\b([А-ЯЁ][а-яё]+)\b', text)
-    numbers = re.findall(r'\b(\d+)\b', text)
-    
-    if mode == "character" and names:
-        return f"Как зовут персонажа {names[0]}?"
-    elif mode == "number" and numbers:
-        return f"Сколько было {numbers[0]}?"
-    else:
-        return "О чём этот текст?"
-
-# --- ПАРСИНГ ГОТОВЫХ КВИЗОВ ---
+# --- ПАРСИНГ ГОТОВЫХ КВИЗОВ (для режима learn) ---
 def parse_quiz(text):
     lines = text.strip().split('\n')
     
@@ -203,7 +253,7 @@ def parse_quiz(text):
                 break
     
     if options:
-        correct_answer = options[0]
+        correct_answer = options[0]  # Упрощённо: правильный = первый вариант
     
     return {
         "question": question,
@@ -235,6 +285,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   → Отправляй текст из инфо-канала, я вытащу вопросы.\n"
         "2️⃣ **Обучение** (команда `/mode learn`)\n"
         "   → Отправляй готовые квизы, я запомню их.\n\n"
+        f"🧠 {'✅ AI-генерация включена (Pollinations)' if POLLINATIONS_AVAILABLE else '⚠️ AI-генерация НЕДОСТУПНА (используется тупой режим)'}\n\n"
         "🎲 `/random` — предложит случайный вопрос с картинкой.\n"
         "📚 `/all` — все вопросы из инфо-канала.\n"
         "📖 `/learned` — все выученные квизы."
@@ -260,11 +311,33 @@ async def set_anchors(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Напиши якоря через пробел, например: `/anchors #фильм Чебурашка`")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Берём текст из любого сообщения (копипаст или пересылка)
-    text = update.message.text or update.message.caption or ""
+    """Обрабатывает любые сообщения: текст, пересылки, медиа с подписями"""
+    
+    # Пытаемся достать текст отовсюду
+    text = ""
+    
+    if update.message.text:
+        text = update.message.text
+    
+    if not text and update.message.caption:
+        text = update.message.caption
+    
+    if not text and update.message.forward_date:
+        if update.message.photo:
+            text = update.message.caption or ""
+        elif update.message.document:
+            text = update.message.caption or ""
+        elif update.message.video:
+            text = update.message.caption or ""
     
     if not text:
-        await update.message.reply_text("❌ Отправь мне текст с вопросами (можно скопировать из поста).")
+        await update.message.reply_text(
+            "❌ Я не вижу текста в этом сообщении.\n\n"
+            "📝 Попробуй так:\n"
+            "1. Открой пост в канале\n"
+            "2. Нажми 'Копировать текст'\n"
+            "3. Вставь его сюда как обычное сообщение"
+        )
         return
     
     mode = context.user_data.get('mode', 'info')
@@ -308,10 +381,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_text(reply)
         else:
-            await update.message.reply_text("❌ Не удалось распознать квиз. Убедись, что есть вопрос и варианты ответов.")
+            await update.message.reply_text(
+                "❌ Не удалось распознать квиз.\n\n"
+                "Убедись, что текст содержит:\n"
+                "- Вопрос со знаком ?\n"
+                "- Варианты ответов (А) Б) В) Г) или 1. 2. 3. 4.)"
+            )
 
 async def show_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает все сохранённые вопросы из инфо-канала"""
     questions = get_all_questions()
     
     if not questions:
@@ -319,7 +396,7 @@ async def show_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     reply = "📚 **Все вопросы из инфо-канала:**\n\n"
-    for i, q in enumerate(questions[:20], 1):  # показываем последние 20
+    for i, q in enumerate(questions[:20], 1):
         reply += f"{i}. {q}\n"
     
     if len(questions) > 20:
@@ -328,7 +405,6 @@ async def show_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 async def show_learned(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает все выученные квизы"""
     quizzes = get_learned_quizzes()
     if not quizzes:
         await update.message.reply_text("📭 Пока нет выученных квизов.")
@@ -346,7 +422,6 @@ async def show_learned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 async def random_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Предлагает случайный вопрос из инфо-базы"""
     questions = get_all_questions_with_hashtags()
     if not questions:
         await update.message.reply_text("❌ В базе нет вопросов. Сначала отправь мне посты в режиме info!")
@@ -410,6 +485,7 @@ def main():
     app.add_handler(CallbackQueryHandler(button_callback))
     
     print("🤖 Бот запущен! Нажми Ctrl+C для остановки.")
+    print(f"🧠 Pollinations доступен: {POLLINATIONS_AVAILABLE}")
     app.run_polling()
 
 if __name__ == "__main__":
