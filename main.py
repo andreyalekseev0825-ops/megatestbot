@@ -138,14 +138,19 @@ def parse_datetime(text):
                 date_str, hour, minute = groups
                 try:
                     dt = datetime.strptime(date_str, '%Y-%m-%d')
-                    return dt.replace(hour=int(hour), minute=int(minute))
+                    dt = dt.replace(hour=int(hour), minute=int(minute))
+                    return dt  # время уже в UTC, если так ввел
                 except:
                     continue
                     
             elif len(groups) == 5:
                 day, month, year, hour, minute = groups
                 try:
-                    return datetime(int(year), int(month), int(day), int(hour), int(minute))
+                    dt = datetime(int(year), int(month), int(day), int(hour), int(minute))
+                    # ПРИБАВЛЯЕМ 3 ЧАСА (МСК = UTC+3)
+                    from datetime import timedelta
+                    dt = dt + timedelta(hours=3)
+                    return dt
                 except:
                     continue
                     
@@ -155,16 +160,25 @@ def parse_datetime(text):
                         day_month = groups[0].split('.')
                         hour, minute = int(groups[2]), int(groups[3])
                         day, month = int(day_month[0]), int(day_month[1])
-                        return datetime(now.year, month, day, hour, minute)
+                        dt = datetime(now.year, month, day, hour, minute)
+                        from datetime import timedelta
+                        dt = dt + timedelta(hours=3)
+                        return dt
                     elif '.' in groups[2]:
                         day_month = groups[2].split('.')
                         hour, minute = int(groups[0]), int(groups[1])
                         day, month = int(day_month[0]), int(day_month[1])
-                        return datetime(now.year, month, day, hour, minute)
+                        dt = datetime(now.year, month, day, hour, minute)
+                        from datetime import timedelta
+                        dt = dt + timedelta(hours=3)
+                        return dt
                 else:
                     hour, minute = int(groups[0]), int(groups[1])
                     day, month = int(groups[2]), int(groups[3])
-                    return datetime(now.year, month, day, hour, minute)
+                    dt = datetime(now.year, month, day, hour, minute)
+                    from datetime import timedelta
+                    dt = dt + timedelta(hours=3)
+                    return dt
     
     return None
 
