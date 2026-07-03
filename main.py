@@ -1,12 +1,11 @@
 import sqlite3
-import json
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # --- КОНФИГ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
-DB_NAME = 'posts.db'  # новая база
+DB_NAME = 'posts.db'
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -20,49 +19,67 @@ def init_db():
             date TIMESTAMP
         )
     ''')
-    # Создаём индекс для быстрого поиска
     c.execute('CREATE INDEX IF NOT EXISTS idx_text ON posts(text)')
     conn.commit()
     conn.close()
+    print("✅ База данных инициализирована")
 
 def save_post(text, source=None):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO posts (text, source, date)
-        VALUES (?, ?, ?)
-    ''', (text, source, datetime.now()))
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO posts (text, source, date)
+            VALUES (?, ?, ?)
+        ''', (text, source, datetime.now()))
+        conn.commit()
+        conn.close()
+        print(f"✅ Сохранён текст: {text[:50]}...")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка сохранения: {e}")
+        return False
 
 def search_posts(keyword):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    # Ищем текст, содержащий ключевое слово (регистронезависимо)
-    c.execute('''
-        SELECT text, source, date FROM posts
-        WHERE text LIKE ?
-        ORDER BY date DESC
-    ''', (f'%{keyword}%',))
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('''
+            SELECT text, source, date FROM posts
+            WHERE text LIKE ?
+            ORDER BY date DESC
+        ''', (f'%{keyword}%',))
+        rows = c.fetchall()
+        conn.close()
+        print(f"🔍 Найдено записей по запросу '{keyword}': {len(rows)}")
+        return rows
+    except Exception as e:
+        print(f"❌ Ошибка поиска: {e}")
+        return []
 
 def get_all_posts():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('SELECT text, source, date FROM posts ORDER BY date DESC')
-    rows = c.fetchall()
-    conn.close()
-    return rows
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('SELECT text, source, date FROM posts ORDER BY date DESC')
+        rows = c.fetchall()
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"❌ Ошибка получения всех постов: {e}")
+        return []
 
 def get_stats():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM posts')
-    count = c.fetchone()[0]
-    conn.close()
-    return count
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) FROM posts')
+        count = c.fetchone()[0]
+        conn.close()
+        return count
+    except Exception as e:
+        print(f"❌ Ошибка статистики: {e}")
+        return 0
 
 # --- ОБРАБОТЧИКИ БОТА ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -80,9 +97,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Отправь мне текст для сохранения.")
         return
 
-    # Сохраняем
-    save_post(text, source="от пользователя")
-    await update.message.reply_text("✅ Текст сохранён в базу!")
+    if save_post(text):
+        await update.message.reply_text("✅ Текст сохранён в базу!")
+    else:
+        await update.message.reply_text("❌ Ошибка при сохранении текста.")
 
 async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -93,20 +111,19 @@ async def find_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔍 Ищу посты со словом: **{keyword}**...")
 
     results = search_posts(keyword)
+    
     if not results:
         await update.message.reply_text(f"📭 Ничего не найдено по запросу: {keyword}")
         return
 
-    # Показываем первые 10 результатов (чтобы не заспамить)
     reply = f"🔍 **Найдено постов: {len(results)}**\n\n"
     for i, (text, source, date) in enumerate(results[:10], 1):
-        # Обрезаем текст до 100 символов для краткости
         preview = text[:100] + "..." if len(text) > 100 else text
         date_str = date.strftime("%d.%m.%Y %H:%M") if date else "неизвестно"
         reply += f"{i}. {preview}\n   📅 {date_str}\n\n"
 
     if len(results) > 10:
-        reply += f"... и ещё {len(results) - 10} постов. Для просмотра всех используй /all"
+        reply += f"\n... и ещё {len(results) - 10} постов."
 
     await update.message.reply_text(reply)
 
