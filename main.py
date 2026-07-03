@@ -3,17 +3,16 @@ import os
 import random
 import re
 import shutil
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, JobQueue
 
 # --- КОНФИГ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 DB_NAME = 'posts.db'
 QUIZZES_DB = 'quizzes.db'
 CHANNEL_ID = "@trassa993"  # ЗАМЕНИ НА СВОЙ КАНАЛ
-
-# ССЫЛКА НА ПРЕДЛОЖКУ
 SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ НА СВОЮ
 
 HASHTAGS = [
@@ -89,7 +88,6 @@ def get_random_quiz():
     return row
 
 def backup_quizzes():
-    """Создаёт копию базы викторин"""
     if os.path.exists(QUIZZES_DB):
         backup_name = f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         shutil.copy2(QUIZZES_DB, backup_name)
@@ -97,7 +95,6 @@ def backup_quizzes():
     return None
 
 def restore_quizzes(file_path):
-    """Восстанавливает базу викторин из файла"""
     try:
         if os.path.exists(file_path) and file_path.endswith('.db'):
             shutil.copy2(file_path, QUIZZES_DB)
@@ -145,7 +142,96 @@ def parse_quiz(text):
         "correct_option_id": correct_option_id
     }
 
-# --- СОСТОЯНИЯ ДЛЯ БОТА ---
+# --- ОТЛОЖЕННАЯ ПУБЛИКАЦИЯ ---
+async def publish_quiz(context: ContextTypes.DEFAULT_TYPE):
+    """Публикует викторину в канал по расписанию"""
+    job_data = context.job.data
+    chat_id = job_data['chat_id']
+    quiz_data = job_data['quiz_data']
+    hashtag = job_data['hashtag']
+    file_id = job_data['file_id']
+    
+    try:
+        caption = (
+            f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
+            f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
+        )
+        
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=file_id,
+            caption=caption,
+            parse_mode="HTML"
+        )
+        
+        await context.bot.send_poll(
+            chat_id=chat_id,
+            question=quiz_data['question'],
+            options=quiz_data['options'],
+            type="quiz",
+            correct_option_id=quiz_data['correct_option_id'],
+            is_anonymous=True
+        )
+        
+        print(f"✅ Викторина опубликована в {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        
+    except Exception as e:
+        print(f"❌ Ошибка публикации: {e}")
+
+async def parse_datetime(text):
+    """Парсит дату и время из текста"""
+    # Форматы: "2026-07-15 14:30" или "15.07 14:30" или "14:30 15.07"
+    patterns = [
+        r'(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})',  # 2026-07-15 14:30
+        r'(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})',  # 15.07.2026 14:30
+        r'(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})',  # 15.07 14:30
+        r'(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})',  # 14:30 15.07
+    ]
+    
+    now = datetime.now()
+    
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            groups = match.groups()
+            
+            if len(groups) == 3:  # 2026-07-15 14:30
+                date_str, hour, minute = groups
+                try:
+                    dt = datetime.strptime(date_str, '%Y-%m-%d')
+                    return dt.replace(hour=int(hour), minute=int(minute))
+                except:
+                    continue
+                    
+            elif len(groups) == 5:  # 15.07.2026 14:30
+                day, month, year, hour, minute = groups
+                try:
+                    return datetime(int(year), int(month), int(day), int(hour), int(minute))
+                except:
+                    continue
+                    
+            elif len(groups) == 4:  # 15.07 14:30 или 14:30 15.07
+                if '.' in groups[0] or '.' in groups[1]:  # 15.07 14:30
+                    # Определяем что есть что
+                    if '.' in groups[0]:
+                        day_month = groups[0].split('.')
+                        hour, minute = int(groups[2]), int(groups[3])
+                        day, month = int(day_month[0]), int(day_month[1])
+                        return datetime(now.year, month, day, hour, minute)
+                    elif '.' in groups[2]:
+                        day_month = groups[2].split('.')
+                        hour, minute = int(groups[0]), int(groups[1])
+                        day, month = int(day_month[0]), int(day_month[1])
+                        return datetime(now.year, month, day, hour, minute)
+                else:
+                    # 14:30 15.07
+                    hour, minute = int(groups[0]), int(groups[1])
+                    day, month = int(groups[2]), int(groups[3])
+                    return datetime(now.year, month, day, hour, minute)
+    
+    return None
+
+# --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Бот для викторин\n\n"
@@ -156,12 +242,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   Где * — правильный ответ\n\n"
         "3. Выбери хэштег\n"
         "4. Отправь картинку\n"
-        "5. Бот опубликует **опрос** в канал!\n\n"
+        "5. **Укажи время публикации** (МСК)\n"
+        "   Например: `15.07 14:30` или `14:30 15.07`\n"
+        "6. Бот опубликует **опрос** в канал в указанное время!\n\n"
         "📩 **Просто текст** — сохраню в базу\n"
         "🎲 `/random` — случайная викторина\n"
         "📚 `/all` — все викторины\n"
-        "💾 `/backup_quizzes` — скачать бэкап викторин\n"
-        "📂 `/restore_quizzes` — восстановить викторины"
+        "💾 `/backup_quizzes` — скачать бэкап викторин"
     )
 
 async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -182,6 +269,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     step = context.user_data.get('step')
     
+    # --- РЕЖИМ ВВОДА ВРЕМЕНИ ---
+    if step == 'waiting_for_time':
+        dt = await parse_datetime(text)
+        if dt:
+            now = datetime.now()
+            if dt < now:
+                await update.message.reply_text(
+                    "❌ Нельзя указать время в прошлом!\n"
+                    "Укажи время в будущем, например: `15.07 14:30`"
+                )
+                return
+            
+            # Сохраняем время публикации
+            context.user_data['publish_time'] = dt
+            context.user_data['step'] = 'waiting_for_confirmation'
+            
+            # Показываем подтверждение
+            quiz_data = context.user_data.get('quiz_data')
+            hashtag = context.user_data.get('quiz_hashtag')
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Подтвердить", callback_data="confirm_publish")],
+                [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
+            ]
+            
+            await update.message.reply_text(
+                f"📅 **Время публикации:** {dt.strftime('%d.%m.%Y в %H:%M')} МСК\n\n"
+                f"❓ {quiz_data['question']}\n"
+                f"🏷️ {hashtag}\n\n"
+                "✅ Подтверждаешь?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Не понял формат времени.\n\n"
+                "Примеры:\n"
+                "`15.07 14:30` — 15 июля в 14:30\n"
+                "`14:30 15.07` — 15 июля в 14:30\n"
+                "`2026-07-15 14:30` — 15 июля 2026 в 14:30"
+            )
+        return
+    
+    # --- РЕЖИМ ВВОДА ВИКТОРИНЫ ---
     if step == 'waiting_for_quiz_text':
         parsed = parse_quiz(text)
         
@@ -240,8 +370,57 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"✅ Хэштег: {hashtag}\n\n"
-            "🖼️ **Отправь картинку** для поста (обложка викторины)."
+            "🖼️ **Отправь картинку** для поста (обложка викторины).\n\n"
+            "После картинки укажи время публикации."
         )
+    
+    elif data == "confirm_publish":
+        # Проверяем, что всё есть
+        quiz_data = context.user_data.get('quiz_data')
+        hashtag = context.user_data.get('quiz_hashtag')
+        file_id = context.user_data.get('file_id')
+        publish_time = context.user_data.get('publish_time')
+        
+        if not quiz_data or not hashtag or not file_id or not publish_time:
+            await query.edit_message_text("❌ Ошибка. Попробуй /quiz заново.")
+            context.user_data.clear()
+            return
+        
+        # Сохраняем викторину в базу
+        save_quiz(
+            quiz_data['question'],
+            ", ".join(quiz_data['options']),
+            quiz_data['correct_answer'],
+            quiz_data['correct_option_id'],
+            hashtag
+        )
+        
+        # Планируем публикацию
+        job_queue = context.job_queue
+        job_data = {
+            'chat_id': CHANNEL_ID,
+            'quiz_data': quiz_data,
+            'hashtag': hashtag,
+            'file_id': file_id
+        }
+        
+        job_queue.run_once(
+            publish_quiz,
+            when=publish_time,
+            data=job_data,
+            name=f"quiz_{datetime.now().timestamp()}"
+        )
+        
+        await query.edit_message_text(
+            f"✅ Викторина запланирована на **{publish_time.strftime('%d.%m.%Y в %H:%M')}** МСК!\n\n"
+            "В указанное время она автоматически появится в канале. 🚀"
+        )
+        
+        context.user_data.clear()
+    
+    elif data == "cancel_publish":
+        await query.edit_message_text("❌ Публикация отменена. Начни заново через /quiz")
+        context.user_data.clear()
 
 async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('step') != 'waiting_for_custom_hashtag':
@@ -256,7 +435,8 @@ async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TY
     
     await update.message.reply_text(
         f"✅ Хэштег: {text}\n\n"
-        "🖼️ **Отправь картинку** для поста."
+        "🖼️ **Отправь картинку** для поста.\n\n"
+        "После картинки укажи время публикации."
     )
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -267,57 +447,19 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Отправь именно картинку")
         return
     
-    quiz_data = context.user_data.get('quiz_data')
-    hashtag = context.user_data.get('quiz_hashtag')
-    
-    if not quiz_data or not hashtag:
-        await update.message.reply_text("❌ Ошибка. Попробуй /quiz заново.")
-        context.user_data.clear()
-        return
-    
-    save_quiz(
-        quiz_data['question'],
-        ", ".join(quiz_data['options']),
-        quiz_data['correct_answer'],
-        quiz_data['correct_option_id'],
-        hashtag
-    )
-    
+    # Сохраняем file_id картинки
     photo = update.message.photo[-1]
-    file_id = photo.file_id
+    context.user_data['file_id'] = photo.file_id
+    context.user_data['step'] = 'waiting_for_time'
     
-    await update.message.reply_text("📤 Публикую в канал...")
-    
-    try:
-        caption = (
-            f"Викторина\n{hashtag}\n\n"
-            f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
-        )
-        
-        await context.bot.send_photo(
-            chat_id=CHANNEL_ID,
-            photo=file_id,
-            caption=caption,
-            parse_mode="HTML"
-        )
-        
-        await context.bot.send_poll(
-            chat_id=CHANNEL_ID,
-            question=quiz_data['question'],
-            options=quiz_data['options'],
-            type="quiz",
-            correct_option_id=quiz_data['correct_option_id'],
-            is_anonymous=True
-        )
-        
-        await update.message.reply_text("✅ Викторина опубликована в канале!")
-        context.user_data.clear()
-        
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+    await update.message.reply_text(
+        "🖼️ Картинка сохранена!\n\n"
+        "📅 **Укажи время публикации** (МСК):\n"
+        "Например: `15.07 14:30` или `14:30 15.07`\n\n"
+        "Также можно указать год: `15.07.2026 14:30`"
+    )
 
 async def backup_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Создаёт бэкап базы викторин и отправляет файл"""
     await update.message.reply_text("💾 Создаю бэкап викторин...")
     
     backup_file = backup_quizzes()
@@ -336,7 +478,6 @@ async def backup_quizzes_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ База викторин не найдена или пуста")
 
 async def restore_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Восстанавливает базу викторин из отправленного файла"""
     if not update.message.document:
         await update.message.reply_text(
             "❌ Отправь файл базы данных (.db) с викторинами\n\n"
@@ -418,13 +559,4 @@ def main():
     app.add_handler(CommandHandler("backup_quizzes", backup_quizzes_command))
     app.add_handler(CommandHandler("restore_quizzes", restore_quizzes_command))
     
-    app.add_handler(MessageHandler(filters.PHOTO, handle_image))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button_callback))
-    
-    print("🤖 Бот запущен!")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    app.add_handler(MessageHandler(filters.PHOTO,
