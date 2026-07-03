@@ -2,9 +2,10 @@ import sqlite3
 import os
 import random
 import re
-import shutil
+import threading
+import time
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # --- КОНФИГИ ---
@@ -38,8 +39,6 @@ def init_db():
 def init_quizzes_db():
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
-    
-    # Таблица викторин
     c.execute('''
         CREATE TABLE IF NOT EXISTS quizzes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,20 +50,6 @@ def init_quizzes_db():
             date TEXT
         )
     ''')
-    
-    # Таблица расписания
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS scheduled (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question TEXT,
-            options TEXT,
-            correct_option_id INTEGER,
-            hashtag TEXT,
-            file_id TEXT,
-            publish_time TEXT
-        )
-    ''')
-    
     conn.commit()
     conn.close()
     print("✅ Базы данных готовы")
@@ -95,54 +80,7 @@ def get_random_quiz():
     conn.close()
     return row
 
-# --- ФУНКЦИИ РАСПИСАНИЯ ---
-def add_scheduled(question, options, correct_option_id, hashtag, file_id, publish_time):
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    c.execute('''
-        INSERT INTO scheduled (question, options, correct_option_id, hashtag, file_id, publish_time)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (question, options, correct_option_id, hashtag, file_id, publish_time.isoformat()))
-    conn.commit()
-    conn.close()
-
-def get_due_quizzes():
-    """Возвращает викторины, которые пора публиковать"""
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    now = datetime.now().isoformat()
-    c.execute('''
-        SELECT id, question, options, correct_option_id, hashtag, file_id, publish_time
-        FROM scheduled WHERE publish_time <= ?
-    ''', (now,))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def delete_scheduled(quiz_id):
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    c.execute('DELETE FROM scheduled WHERE id = ?', (quiz_id,))
-    conn.commit()
-    conn.close()
-
-def backup_quizzes():
-    if os.path.exists(QUIZZES_DB):
-        backup_name = f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-        shutil.copy2(QUIZZES_DB, backup_name)
-        return backup_name
-    return None
-
-def restore_quizzes(file_path):
-    try:
-        if os.path.exists(file_path) and file_path.endswith('.db'):
-            shutil.copy2(file_path, QUIZZES_DB)
-            return True
-    except Exception as e:
-        print(f"❌ Ошибка восстановления: {e}")
-    return False
-
-# --- ПАРСИНГ ВИКТОРИНЫ ---
+# --- ПАРСИНГ ---
 def parse_quiz(text):
     text = text.strip()
     match = re.match(r'^(.+?)\s*\((.+)\)\s*$', text)
@@ -179,7 +117,6 @@ def parse_quiz(text):
         "correct_option_id": correct_option_id
     }
 
-# --- ПАРСИНГ ВРЕМЕНИ ---
 def parse_datetime(text):
     from datetime import timedelta
     
@@ -250,42 +187,44 @@ def parse_datetime(text):
     
     return None
 
-# --- ПРОВЕРКА РАСПИСАНИЯ ---
-async def check_and_publish_due(context: ContextTypes.DEFAULT_TYPE):
-    """Проверяет и публикует викторины, у которых наступило время"""
-    due = get_due_quizzes()
-    
-    for row in due:
-        quiz_id, question, options, correct_option_id, hashtag, file_id, publish_time_str = row
-        options_list = options.split(", ") if options else []
+# --- ФУНКЦИЯ ДЛЯ ТАЙМЕРА ---
+def delayed_publish(bot_token, chat_id, file_id, quiz_data, hashtag, publish_time):
+    """Ждёт и публикует викторину"""
+    try:
+        # Ждём до нужного времени
+        while datetime.now() < publish_time:
+            time.sleep(10)
         
-        try:
-            caption = (
-                f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
-                f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
-            )
-            
-            await context.bot.send_photo(
-                chat_id=CHANNEL_ID,
-                photo=file_id,
-                caption=caption,
-                parse_mode="HTML"
-            )
-            
-            await context.bot.send_poll(
-                chat_id=CHANNEL_ID,
-                question=question,
-                options=options_list,
-                type="quiz",
-                correct_option_id=correct_option_id,
-                is_anonymous=True
-            )
-            
-            delete_scheduled(quiz_id)
-            print(f"✅ Викторина опубликована: {question[:30]}...")
-            
-        except Exception as e:
-            print(f"❌ Ошибка публикации: {e}")
+        # Создаём отдельный экземпляр бота
+        bot = Bot(token=bot_token)
+        
+        caption = (
+            f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
+            f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
+        )
+        
+        # Отправляем фото
+        bot.send_photo(
+            chat_id=chat_id,
+            photo=file_id,
+            caption=caption,
+            parse_mode="HTML"
+        )
+        
+        # Отправляем опрос
+        bot.send_poll(
+            chat_id=chat_id,
+            question=quiz_data['question'],
+            options=quiz_data['options'],
+            type="quiz",
+            correct_option_id=quiz_data['correct_option_id'],
+            is_anonymous=True
+        )
+        
+        print(f"✅ Викторина опубликована: {quiz_data['question'][:30]}...")
+        
+    except Exception as e:
+        print(f"❌ Ошибка публикации: {e}")
 
 # --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -294,9 +233,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📝 **Создать викторину:** `/quiz`\n"
         "📩 **Просто текст** — сохраню в базу\n"
         "🎲 `/random` — случайная викторина\n"
-        "📚 `/all` — все викторины\n"
-        "💾 `/backup_quizzes` — скачать бэкап викторин\n"
-        "📂 `/restore_quizzes` — восстановить викторины"
+        "📚 `/all` — все викторины"
     )
 
 async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -310,9 +247,6 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем расписание при каждом сообщении
-    await check_and_publish_due(context)
-    
     text = update.message.text
     if not text:
         await update.message.reply_text("❌ Отправь текст")
@@ -423,7 +357,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             return
         
-        # Сохраняем викторину в основную базу
+        # Сохраняем в базу
         save_quiz(
             quiz_data['question'],
             ", ".join(quiz_data['options']),
@@ -432,15 +366,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             hashtag
         )
         
-        # Сохраняем в расписание
-        add_scheduled(
-            quiz_data['question'],
-            ", ".join(quiz_data['options']),
-            quiz_data['correct_option_id'],
-            hashtag,
-            file_id,
-            publish_time
+        # Создаём и запускаем поток с таймером
+        thread = threading.Thread(
+            target=delayed_publish,
+            args=[BOT_TOKEN, CHANNEL_ID, file_id, quiz_data, hashtag, publish_time]
         )
+        thread.daemon = True
+        thread.start()
         
         delay = int((publish_time - datetime.now()).total_seconds())
         
@@ -496,52 +428,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Например: `20:33` или `03.07 20:33`"
     )
 
-async def backup_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💾 Создаю бэкап викторин...")
-    
-    backup_file = backup_quizzes()
-    if backup_file and os.path.exists(backup_file):
-        try:
-            with open(backup_file, 'rb') as f:
-                await update.message.reply_document(
-                    document=f,
-                    filename=f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
-                    caption="✅ Бэкап викторин создан!"
-                )
-            os.remove(backup_file)
-        except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка при отправке: {e}")
-    else:
-        await update.message.reply_text("❌ База викторин не найдена")
-
-async def restore_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.document:
-        await update.message.reply_text("❌ Отправь файл .db с викторинами")
-        return
-    
-    document = update.message.document
-    if not document.file_name.endswith('.db'):
-        await update.message.reply_text("❌ Файл должен иметь расширение .db")
-        return
-    
-    await update.message.reply_text("📥 Восстанавливаю викторины...")
-    
-    try:
-        file = await context.bot.get_file(document.file_id)
-        file_path = f"restore_quizzes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-        await file.download_to_drive(file_path)
-        
-        if restore_quizzes(file_path):
-            os.remove(file_path)
-            await update.message.reply_text("✅ База викторин восстановлена!")
-            quizzes = get_all_quizzes()
-            await update.message.reply_text(f"📊 Всего викторин в базе: {len(quizzes)}")
-        else:
-            await update.message.reply_text("❌ Ошибка при восстановлении")
-            
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
-
 async def random_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz = get_random_quiz()
     if not quiz:
@@ -564,4 +450,36 @@ async def all_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quizzes = get_all_quizzes()
     if not quizzes:
         await update.message.reply_text("📭 В базе пока нет викторин")
-        r     
+        return
+    
+    reply = "📚 **Все викторины:**\n\n"
+    for i, (id_, question, options, correct, hashtag) in enumerate(quizzes[:10], 1):
+        reply += f"{i}. {question[:50]}...\n"
+        if hashtag:
+            reply += f"   🏷️ {hashtag}\n"
+    
+    await update.message.reply_text(reply)
+
+# --- ЗАПУСК ---
+def main():
+    init_db()
+    init_quizzes_db()
+    
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("quiz", start_quiz))
+    app.add_handler(CommandHandler("random", random_quiz))
+    app.add_handler(CommandHandler("all", all_quizzes))
+    
+    app.add_handler(MessageHandler(filters.PHOTO, handle_image))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_callback))
+    
+    print("🤖 Бот запущен!")
+    print(f"📅 Текущее время (МСК): {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
