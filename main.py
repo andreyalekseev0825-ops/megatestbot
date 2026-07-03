@@ -120,11 +120,15 @@ def parse_quiz(text):
 
 # --- ПАРСИНГ ДАТЫ ---
 def parse_datetime(text):
+    """Парсит время с учётом МСК (UTC+3)"""
+    from datetime import timedelta
+    
     patterns = [
         r'(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})',
         r'(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})',
         r'(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})',
         r'(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})',
+        r'(\d{1,2}):(\d{2})',  # Только время
     ]
     
     now = datetime.now()
@@ -134,54 +138,54 @@ def parse_datetime(text):
         if match:
             groups = match.groups()
             
-            if len(groups) == 3:
+            # Только время (20:33) -> сегодня в это время
+            if len(groups) == 2 and all(g.isdigit() for g in groups):
+                hour, minute = int(groups[0]), int(groups[1])
+                dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                # Если уже прошло сегодня — значит завтра
+                if dt < now:
+                    dt = dt + timedelta(days=1)
+                return dt
+            
+            elif len(groups) == 3:  # 2026-07-03 20:33
                 date_str, hour, minute = groups
                 try:
                     dt = datetime.strptime(date_str, '%Y-%m-%d')
                     dt = dt.replace(hour=int(hour), minute=int(minute))
-                    return dt  # время уже в UTC, если так ввел
-                except:
-                    continue
-                    
-            elif len(groups) == 5:
-                day, month, year, hour, minute = groups
-                try:
-                    dt = datetime(int(year), int(month), int(day), int(hour), int(minute))
-                    # ПРИБАВЛЯЕМ 3 ЧАСА (МСК = UTC+3)
-                    from datetime import timedelta
-                    dt = dt + timedelta(hours=3)
                     return dt
                 except:
                     continue
                     
-            elif len(groups) == 4:
+            elif len(groups) == 5:  # 03.07.2026 20:33
+                day, month, year, hour, minute = groups
+                try:
+                    dt = datetime(int(year), int(month), int(day), int(hour), int(minute))
+                    return dt
+                except:
+                    continue
+                    
+            elif len(groups) == 4:  # 03.07 20:33 или 20:33 03.07
                 if '.' in groups[0] or '.' in groups[1]:
                     if '.' in groups[0]:
                         day_month = groups[0].split('.')
                         hour, minute = int(groups[2]), int(groups[3])
                         day, month = int(day_month[0]), int(day_month[1])
                         dt = datetime(now.year, month, day, hour, minute)
-                        from datetime import timedelta
-                        dt = dt + timedelta(hours=3)
                         return dt
                     elif '.' in groups[2]:
                         day_month = groups[2].split('.')
                         hour, minute = int(groups[0]), int(groups[1])
                         day, month = int(day_month[0]), int(day_month[1])
                         dt = datetime(now.year, month, day, hour, minute)
-                        from datetime import timedelta
-                        dt = dt + timedelta(hours=3)
                         return dt
                 else:
                     hour, minute = int(groups[0]), int(groups[1])
                     day, month = int(groups[2]), int(groups[3])
                     dt = datetime(now.year, month, day, hour, minute)
-                    from datetime import timedelta
-                    dt = dt + timedelta(hours=3)
                     return dt
     
     return None
-
+    
 # --- ФУНКЦИЯ ДЛЯ ТАЙМЕРА (ПРОСТОЙ ВАРИАНТ) ---
 def publish_quiz_task(bot_token, chat_id, file_id, quiz_data, hashtag):
     """Запускается в отдельном потоке и публикует викторину"""
