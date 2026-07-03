@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 DB_NAME = 'posts.db'
 QUIZZES_DB = 'quizzes.db'
-CHANNEL_ID = "@tryaslos"  # ЗАМЕНИ НА СВОЙ КАНАЛ
+CHANNEL_ID = "@trassa993"  # ЗАМЕНИ НА СВОЙ КАНАЛ
 
 # ССЫЛКА НА ПРЕДЛОЖКУ
 SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ НА СВОЮ
