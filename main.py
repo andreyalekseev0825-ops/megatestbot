@@ -2,6 +2,7 @@ import sqlite3
 import os
 import random
 import re
+import shutil
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -12,8 +13,8 @@ DB_NAME = 'posts.db'
 QUIZZES_DB = 'quizzes.db'
 CHANNEL_ID = "@tryaslos"  # ЗАМЕНИ НА СВОЙ КАНАЛ
 
-# ССЫЛКА НА ПРЕДЛОЖКУ — ЗАМЕНИ НА СВОЮ!
-SUGGESTION_LINK = "https://t.me/trassa993?direct"  # <-- СЮДА ВСТАВЬ СВОЮ ССЫЛКУ
+# ССЫЛКА НА ПРЕДЛОЖКУ
+SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ НА СВОЮ
 
 HASHTAGS = [
     "#Новое_поколение",
@@ -87,6 +88,24 @@ def get_random_quiz():
     conn.close()
     return row
 
+def backup_quizzes():
+    """Создаёт копию базы викторин"""
+    if os.path.exists(QUIZZES_DB):
+        backup_name = f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        shutil.copy2(QUIZZES_DB, backup_name)
+        return backup_name
+    return None
+
+def restore_quizzes(file_path):
+    """Восстанавливает базу викторин из файла"""
+    try:
+        if os.path.exists(file_path) and file_path.endswith('.db'):
+            shutil.copy2(file_path, QUIZZES_DB)
+            return True
+    except Exception as e:
+        print(f"❌ Ошибка восстановления: {e}")
+    return False
+
 # --- ПАРСИНГ ВИКТОРИНЫ ---
 def parse_quiz(text):
     text = text.strip()
@@ -140,7 +159,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "5. Бот опубликует **опрос** в канал!\n\n"
         "📩 **Просто текст** — сохраню в базу\n"
         "🎲 `/random` — случайная викторина\n"
-        "📚 `/all` — все викторины"
+        "📚 `/all` — все викторины\n"
+        "💾 `/backup_quizzes` — скачать бэкап викторин\n"
+        "📂 `/restore_quizzes` — восстановить викторины"
     )
 
 async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -239,9 +260,7 @@ async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TY
     )
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ЕСЛИ БОТ НЕ ЖДЁТ КАРТИНКУ — ИГНОРИРУЕМ
     if context.user_data.get('step') != 'waiting_for_image':
-        # Просто игнорируем фото, если оно не нужно
         return
     
     if not update.message.photo:
@@ -270,7 +289,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📤 Публикую в канал...")
     
     try:
-        # 1. Картинка с подписью (гиперссылка)
         caption = (
             f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
             f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
@@ -283,7 +301,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         
-        # 2. Опрос (без объяснения)
         await context.bot.send_poll(
             chat_id=CHANNEL_ID,
             question=quiz_data['question'],
@@ -296,6 +313,63 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Викторина опубликована в канале!")
         context.user_data.clear()
         
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+async def backup_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Создаёт бэкап базы викторин и отправляет файл"""
+    await update.message.reply_text("💾 Создаю бэкап викторин...")
+    
+    backup_file = backup_quizzes()
+    if backup_file and os.path.exists(backup_file):
+        try:
+            with open(backup_file, 'rb') as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+                    caption="✅ Бэкап викторин создан!"
+                )
+            os.remove(backup_file)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка при отправке: {e}")
+    else:
+        await update.message.reply_text("❌ База викторин не найдена или пуста")
+
+async def restore_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Восстанавливает базу викторин из отправленного файла"""
+    if not update.message.document:
+        await update.message.reply_text(
+            "❌ Отправь файл базы данных (.db) с викторинами\n\n"
+            "Пример: quizzes_backup_20260101_120000.db"
+        )
+        return
+    
+    document = update.message.document
+    
+    if not document.file_name.endswith('.db'):
+        await update.message.reply_text("❌ Файл должен иметь расширение .db")
+        return
+    
+    if document.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text("❌ Файл слишком большой (максимум 20 МБ)")
+        return
+    
+    await update.message.reply_text("📥 Восстанавливаю викторины...")
+    
+    try:
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"restore_quizzes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        await file.download_to_drive(file_path)
+        
+        if restore_quizzes(file_path):
+            os.remove(file_path)
+            await update.message.reply_text("✅ База викторин восстановлена!")
+            
+            quizzes = get_all_quizzes()
+            await update.message.reply_text(f"📊 Всего викторин в базе: {len(quizzes)}")
+        else:
+            await update.message.reply_text("❌ Ошибка при восстановлении")
+            
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
 
@@ -341,6 +415,8 @@ def main():
     app.add_handler(CommandHandler("quiz", start_quiz))
     app.add_handler(CommandHandler("random", random_quiz))
     app.add_handler(CommandHandler("all", all_quizzes))
+    app.add_handler(CommandHandler("backup_quizzes", backup_quizzes_command))
+    app.add_handler(CommandHandler("restore_quizzes", restore_quizzes_command))
     
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
