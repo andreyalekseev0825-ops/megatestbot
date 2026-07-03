@@ -10,7 +10,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 DB_NAME = 'posts.db'
 QUIZZES_DB = 'quizzes.db'
-CHANNEL_ID = "@trassa993"  # ЗАМЕНИ НА СВОЙ КАНАЛ
+CHANNEL_ID = "@your_channel"  # ЗАМЕНИ НА СВОЙ КАНАЛ
 
 # Список доступных хэштегов
 HASHTAGS = [
@@ -84,14 +84,6 @@ def get_random_quiz():
     conn.close()
     return row
 
-def get_quiz_by_id(quiz_id):
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    c.execute('SELECT question, options, correct_answer, hashtag FROM quizzes WHERE id = ?', (quiz_id,))
-    row = c.fetchone()
-    conn.close()
-    return row
-
 # --- ПАРСИНГ ВИКТОРИНЫ ---
 def parse_quiz(text):
     """
@@ -139,17 +131,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Бот для викторин\n\n"
         "📝 **Как создать викторину:**\n"
-        "1. Отправь вопрос и варианты:\n"
+        "1. Напиши `/quiz`\n"
+        "2. Отправь вопрос и варианты:\n"
         "   `Вопрос?`\n"
         "   `Вариант 1`\n"
         "   `Вариант 2*` ← * это правильный ответ\n"
         "   `Вариант 3`\n"
         "   `Вариант 4`\n\n"
-        "2. Выбери хэштег из предложенных\n"
-        "3. Отправь картинку для поста\n"
-        "4. Бот опубликует в канал!\n\n"
+        "3. Выбери хэштег из предложенных\n"
+        "4. Отправь картинку для поста\n"
+        "5. Бот опубликует в канал!\n\n"
+        "📩 **Просто отправь текст** — сохраню в базу\n"
         "🎲 `/random` — случайная викторина\n"
         "📚 `/all` — все викторины"
+    )
+
+async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /quiz — начать создание викторины"""
+    context.user_data['step'] = 'waiting_for_quiz_text'
+    await update.message.reply_text(
+        "📝 Отправь вопрос и варианты ответов.\n\n"
+        "Формат:\n"
+        "`Вопрос?`\n"
+        "`Вариант 1`\n"
+        "`Вариант 2*` ← * правильный ответ\n"
+        "`Вариант 3`\n"
+        "`Вариант 4`"
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -158,33 +165,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Отправь мне текст")
         return
     
-    # Проверяем, похоже ли на викторину
-    parsed = parse_quiz(text)
+    step = context.user_data.get('step')
     
-    if parsed and len(parsed['options']) >= 2:
-        # Сохраняем данные викторины в контекст
-        context.user_data['quiz_data'] = parsed
-        context.user_data['step'] = 'waiting_for_hashtag'
+    # --- РЕЖИМ СОЗДАНИЯ ВИКТОРИНЫ ---
+    if step == 'waiting_for_quiz_text':
+        parsed = parse_quiz(text)
         
-        # Показываем кнопки с хэштегами
-        keyboard = []
-        for hashtag in HASHTAGS:
-            keyboard.append([InlineKeyboardButton(hashtag, callback_data=f"hashtag_{hashtag}")])
-        keyboard.append([InlineKeyboardButton("✏️ Свой хэштег", callback_data="hashtag_custom")])
-        
-        await update.message.reply_text(
-            "🏷️ **Выбери хэштег для викторины:**",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    else:
-        # Это просто текст — сохраняем в базу
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute('INSERT INTO posts (text, date) VALUES (?, ?)', 
-                  (text, datetime.now().isoformat()))
-        conn.commit()
-        conn.close()
-        await update.message.reply_text("✅ Текст сохранён!")
+        if parsed and len(parsed['options']) >= 2:
+            context.user_data['quiz_data'] = parsed
+            context.user_data['step'] = 'waiting_for_hashtag'
+            
+            # Показываем кнопки с хэштегами
+            keyboard = []
+            for hashtag in HASHTAGS:
+                keyboard.append([InlineKeyboardButton(hashtag, callback_data=f"hashtag_{hashtag}")])
+            keyboard.append([InlineKeyboardButton("✏️ Свой хэштег", callback_data="hashtag_custom")])
+            
+            await update.message.reply_text(
+                "🏷️ **Выбери хэштег для викторины:**",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Не удалось распознать викторину.\n\n"
+                "Формат:\n"
+                "`Вопрос?`\n"
+                "`Вариант 1`\n"
+                "`Вариант 2*` ← * правильный ответ\n"
+                "`Вариант 3`\n"
+                "`Вариант 4`"
+            )
+        return
+    
+    # --- ОБЫЧНЫЙ ТЕКСТ (сохраняем в базу) ---
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute('INSERT INTO posts (text, date) VALUES (?, ?)', 
+              (text, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    await update.message.reply_text("✅ Текст сохранён в базу!")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -200,7 +220,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['step'] = 'waiting_for_custom_hashtag'
             return
         
-        # Сохраняем хэштег
         context.user_data['quiz_hashtag'] = hashtag
         context.user_data['step'] = 'waiting_for_image'
         
@@ -210,26 +229,39 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Это будет обложка викторины."
         )
 
-async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает картинку для викторины"""
-    step = context.user_data.get('step')
-    
-    if step != 'waiting_for_image':
-        # Если бот не ждёт картинку — просто сохраняем как обычно
-        await update.message.reply_text("ℹ️ Сейчас я не жду картинку. Сначала создай викторину!")
+async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает кастомный хэштег"""
+    if context.user_data.get('step') != 'waiting_for_custom_hashtag':
         return
     
-    # Проверяем, есть ли фото
+    text = update.message.text.strip()
+    if not text.startswith('#'):
+        text = '#' + text
+    
+    context.user_data['quiz_hashtag'] = text
+    context.user_data['step'] = 'waiting_for_image'
+    
+    await update.message.reply_text(
+        f"✅ Хэштег сохранён: {text}\n\n"
+        "🖼️ Теперь **отправь картинку** для поста.\n"
+        "Это будет обложка викторины."
+    )
+
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает картинку для викторины"""
+    if context.user_data.get('step') != 'waiting_for_image':
+        await update.message.reply_text("ℹ️ Сейчас я не жду картинку. Сначала создай викторину через /quiz")
+        return
+    
     if not update.message.photo:
         await update.message.reply_text("❌ Отправь именно картинку (фото)")
         return
     
-    # Получаем данные викторины
     quiz_data = context.user_data.get('quiz_data')
     hashtag = context.user_data.get('quiz_hashtag')
     
     if not quiz_data or not hashtag:
-        await update.message.reply_text("❌ Что-то пошло не так. Попробуй начать заново.")
+        await update.message.reply_text("❌ Что-то пошло не так. Попробуй /quiz заново.")
         context.user_data.clear()
         return
     
@@ -241,62 +273,35 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hashtag
     )
     
-    # Получаем file_id картинки (самый большой размер)
     photo = update.message.photo[-1]
     file_id = photo.file_id
     
     await update.message.reply_text("📤 Публикую в канал...")
     
     try:
-        # Формируем подпись к картинке
         caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\nТрясЛо №993 | Скинуть что-нибудь в предложку"
         
-        # Отправляем картинку в канал
         await context.bot.send_photo(
             chat_id=CHANNEL_ID,
             photo=file_id,
             caption=caption
         )
         
-        # Формируем текст викторины
         options_text = "\n".join([f"{i+1}. {opt}" for i, opt in enumerate(quiz_data['options'])])
         quiz_message = f"❓ {quiz_data['question']}\n\n{options_text}"
         
-        # Отправляем викторину в канал
         await context.bot.send_message(
             chat_id=CHANNEL_ID,
             text=quiz_message
         )
         
         await update.message.reply_text("✅ Викторина опубликована в канале!")
-        
-        # Очищаем контекст
         context.user_data.clear()
         
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка при публикации: {e}")
 
-async def custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает кастомный хэштег"""
-    step = context.user_data.get('step')
-    
-    if step != 'waiting_for_custom_hashtag':
-        return
-    
-    text = update.message.text
-    if not text.startswith('#'):
-        text = '#' + text
-    
-    context.user_data['quiz_hashtag'] = text
-    context.user_data['step'] = 'waiting_for_image'
-    
-    await update.message.reply_text(
-        f"✅ Хэштег сохранён: {text}\n\n"
-        "🖼️ Теперь **отправь картинку** для поста."
-    )
-
 async def random_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает случайную викторину из базы"""
     quiz = get_random_quiz()
     if not quiz:
         await update.message.reply_text("📭 В базе пока нет викторин")
@@ -315,7 +320,6 @@ async def random_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 async def all_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает все викторины"""
     quizzes = get_all_quizzes()
     if not quizzes:
         await update.message.reply_text("📭 В базе пока нет викторин")
@@ -336,10 +340,12 @@ def main():
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("quiz", start_quiz))
     app.add_handler(CommandHandler("random", random_quiz))
     app.add_handler(CommandHandler("all", all_quizzes))
+    
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), custom_hashtag))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     
