@@ -12,7 +12,6 @@ DB_NAME = 'posts.db'
 QUIZZES_DB = 'quizzes.db'
 CHANNEL_ID = "@your_channel"  # ЗАМЕНИ НА СВОЙ КАНАЛ
 
-# Список доступных хэштегов
 HASHTAGS = [
     "#Новое_поколение",
     "#Игра_бога",
@@ -84,45 +83,48 @@ def get_random_quiz():
     conn.close()
     return row
 
-# --- ПАРСИНГ ВИКТОРИНЫ ---
+# --- НОВЫЙ ПАРСИНГ ВИКТОРИНЫ ---
 def parse_quiz(text):
     """
-    Парсит текст викторины.
-    
-    Формат:
-    Вопрос?
-    Вариант 1
-    Вариант 2*
-    Вариант 3
-    Вариант 4
+    Парсит викторину в формате:
+    Как зовут персонажа (Глен; Ашра; Кацпер; Воланд*)
     
     * — правильный ответ
     """
-    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+    text = text.strip()
     
-    if len(lines) < 3:
+    # Ищем вопрос и варианты в скобках
+    match = re.match(r'^(.+?)\s*\((.+)\)\s*$', text)
+    if not match:
         return None
     
-    question = lines[0]
-    options = []
+    question = match.group(1).strip()
+    options_raw = match.group(2).strip()
+    
+    # Разделяем варианты по точке с запятой
+    options = [opt.strip() for opt in options_raw.split(';') if opt.strip()]
+    
+    if len(options) < 2:
+        return None
+    
+    # Ищем правильный ответ (с * в конце)
     correct_answer = None
+    cleaned_options = []
     
-    for line in lines[1:]:
-        # Убираем префиксы (А), 1., и т.д.)
-        clean_line = re.sub(r'^[А-Яа-яA-Za-z0-9][\)\.]\s*', '', line)
-        
-        if clean_line.endswith('*'):
-            correct_answer = clean_line[:-1].strip()
-            options.append(correct_answer)
+    for opt in options:
+        if opt.endswith('*'):
+            correct_answer = opt[:-1].strip()
+            cleaned_options.append(correct_answer)
         else:
-            options.append(clean_line)
+            cleaned_options.append(opt)
     
-    if not correct_answer and options:
-        correct_answer = options[0]
+    # Если правильный ответ не найден — берём первый вариант
+    if not correct_answer and cleaned_options:
+        correct_answer = cleaned_options[0]
     
     return {
         "question": question,
-        "options": options,
+        "options": cleaned_options,
         "correct_answer": correct_answer
     }
 
@@ -132,31 +134,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Бот для викторин\n\n"
         "📝 **Как создать викторину:**\n"
         "1. Напиши `/quiz`\n"
-        "2. Отправь вопрос и варианты:\n"
-        "   `Вопрос?`\n"
-        "   `Вариант 1`\n"
-        "   `Вариант 2*` ← * это правильный ответ\n"
-        "   `Вариант 3`\n"
-        "   `Вариант 4`\n\n"
-        "3. Выбери хэштег из предложенных\n"
-        "4. Отправь картинку для поста\n"
+        "2. Отправь в формате:\n"
+        "   `Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n\n"
+        "   Где * — правильный ответ\n\n"
+        "3. Выбери хэштег\n"
+        "4. Отправь картинку\n"
         "5. Бот опубликует в канал!\n\n"
-        "📩 **Просто отправь текст** — сохраню в базу\n"
+        "📩 **Просто текст** — сохраню в базу\n"
         "🎲 `/random` — случайная викторина\n"
         "📚 `/all` — все викторины"
     )
 
 async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /quiz — начать создание викторины"""
     context.user_data['step'] = 'waiting_for_quiz_text'
     await update.message.reply_text(
-        "📝 Отправь вопрос и варианты ответов.\n\n"
-        "Формат:\n"
-        "`Вопрос?`\n"
-        "`Вариант 1`\n"
-        "`Вариант 2*` ← * правильный ответ\n"
-        "`Вариант 3`\n"
-        "`Вариант 4`"
+        "📝 Отправь викторину в формате:\n\n"
+        "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n\n"
+        "Где * — правильный ответ\n\n"
+        "Пример:\n"
+        "`Как зовут персонажа (Глен; Ашра; Кацпер; Воланд*)`"
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -175,29 +171,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['quiz_data'] = parsed
             context.user_data['step'] = 'waiting_for_hashtag'
             
-            # Показываем кнопки с хэштегами
             keyboard = []
             for hashtag in HASHTAGS:
                 keyboard.append([InlineKeyboardButton(hashtag, callback_data=f"hashtag_{hashtag}")])
             keyboard.append([InlineKeyboardButton("✏️ Свой хэштег", callback_data="hashtag_custom")])
             
             await update.message.reply_text(
-                "🏷️ **Выбери хэштег для викторины:**",
+                f"✅ Вопрос: {parsed['question']}\n"
+                f"✅ Вариантов: {len(parsed['options'])}\n"
+                f"✅ Правильный ответ: {parsed['correct_answer']}\n\n"
+                "🏷️ **Выбери хэштег:**",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
             await update.message.reply_text(
-                "❌ Не удалось распознать викторину.\n\n"
-                "Формат:\n"
-                "`Вопрос?`\n"
-                "`Вариант 1`\n"
-                "`Вариант 2*` ← * правильный ответ\n"
-                "`Вариант 3`\n"
-                "`Вариант 4`"
+                "❌ Неправильный формат.\n\n"
+                "Нужно:\n"
+                "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n\n"
+                "Где * — правильный ответ"
             )
         return
     
-    # --- ОБЫЧНЫЙ ТЕКСТ (сохраняем в базу) ---
+    # --- ОБЫЧНЫЙ ТЕКСТ ---
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('INSERT INTO posts (text, date) VALUES (?, ?)', 
@@ -224,13 +219,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['step'] = 'waiting_for_image'
         
         await query.edit_message_text(
-            f"✅ Хэштег выбран: {hashtag}\n\n"
-            "🖼️ Теперь **отправь картинку** для поста.\n"
-            "Это будет обложка викторины."
+            f"✅ Хэштег: {hashtag}\n\n"
+            "🖼️ **Отправь картинку** для поста (обложка викторины)."
         )
 
 async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает кастомный хэштег"""
     if context.user_data.get('step') != 'waiting_for_custom_hashtag':
         return
     
@@ -242,30 +235,27 @@ async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['step'] = 'waiting_for_image'
     
     await update.message.reply_text(
-        f"✅ Хэштег сохранён: {text}\n\n"
-        "🖼️ Теперь **отправь картинку** для поста.\n"
-        "Это будет обложка викторины."
+        f"✅ Хэштег: {text}\n\n"
+        "🖼️ **Отправь картинку** для поста."
     )
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает картинку для викторины"""
     if context.user_data.get('step') != 'waiting_for_image':
-        await update.message.reply_text("ℹ️ Сейчас я не жду картинку. Сначала создай викторину через /quiz")
+        await update.message.reply_text("ℹ️ Сначала создай викторину через /quiz")
         return
     
     if not update.message.photo:
-        await update.message.reply_text("❌ Отправь именно картинку (фото)")
+        await update.message.reply_text("❌ Отправь именно картинку")
         return
     
     quiz_data = context.user_data.get('quiz_data')
     hashtag = context.user_data.get('quiz_hashtag')
     
     if not quiz_data or not hashtag:
-        await update.message.reply_text("❌ Что-то пошло не так. Попробуй /quiz заново.")
+        await update.message.reply_text("❌ Ошибка. Попробуй /quiz заново.")
         context.user_data.clear()
         return
     
-    # Сохраняем викторину в базу
     save_quiz(
         quiz_data['question'],
         ", ".join(quiz_data['options']),
@@ -299,7 +289,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка при публикации: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {e}")
 
 async def random_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     quiz = get_random_quiz()
