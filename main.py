@@ -10,7 +10,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 DB_NAME = 'posts.db'
 QUIZZES_DB = 'quizzes.db'
-CHANNEL_ID = "@your_channel"  # ЗАМЕНИ НА СВОЙ КАНАЛ
+CHANNEL_ID = "@tryaslos"  # ЗАМЕНИ НА СВОЙ КАНАЛ
 
 HASHTAGS = [
     "#Новое_поколение",
