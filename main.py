@@ -48,6 +48,7 @@ def init_quizzes_db():
             question TEXT,
             options TEXT,
             correct_answer TEXT,
+            correct_option_id INTEGER,
             hashtag TEXT,
             date TEXT
         )
@@ -56,13 +57,13 @@ def init_quizzes_db():
     conn.close()
     print("✅ Базы данных готовы")
 
-def save_quiz(question, options, correct_answer, hashtag=None):
+def save_quiz(question, options, correct_answer, correct_option_id, hashtag=None):
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     c.execute('''
-        INSERT INTO quizzes (question, options, correct_answer, hashtag, date)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (question, options, correct_answer, hashtag, datetime.now().isoformat()))
+        INSERT INTO quizzes (question, options, correct_answer, correct_option_id, hashtag, date)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (question, options, correct_answer, correct_option_id, hashtag, datetime.now().isoformat()))
     conn.commit()
     conn.close()
     print(f"✅ Викторина сохранена: {question[:30]}...")
@@ -78,12 +79,12 @@ def get_all_quizzes():
 def get_random_quiz():
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
-    c.execute('SELECT question, options, correct_answer, hashtag FROM quizzes ORDER BY RANDOM() LIMIT 1')
+    c.execute('SELECT question, options, correct_answer, correct_option_id, hashtag FROM quizzes ORDER BY RANDOM() LIMIT 1')
     row = c.fetchone()
     conn.close()
     return row
 
-# --- НОВЫЙ ПАРСИНГ ВИКТОРИНЫ ---
+# --- ПАРСИНГ ВИКТОРИНЫ ---
 def parse_quiz(text):
     """
     Парсит викторину в формате:
@@ -93,7 +94,6 @@ def parse_quiz(text):
     """
     text = text.strip()
     
-    # Ищем вопрос и варианты в скобках
     match = re.match(r'^(.+?)\s*\((.+)\)\s*$', text)
     if not match:
         return None
@@ -101,31 +101,32 @@ def parse_quiz(text):
     question = match.group(1).strip()
     options_raw = match.group(2).strip()
     
-    # Разделяем варианты по точке с запятой
     options = [opt.strip() for opt in options_raw.split(';') if opt.strip()]
     
     if len(options) < 2:
         return None
     
-    # Ищем правильный ответ (с * в конце)
     correct_answer = None
+    correct_option_id = None
     cleaned_options = []
     
-    for opt in options:
+    for i, opt in enumerate(options):
         if opt.endswith('*'):
             correct_answer = opt[:-1].strip()
+            correct_option_id = i
             cleaned_options.append(correct_answer)
         else:
             cleaned_options.append(opt)
     
-    # Если правильный ответ не найден — берём первый вариант
     if not correct_answer and cleaned_options:
         correct_answer = cleaned_options[0]
+        correct_option_id = 0
     
     return {
         "question": question,
         "options": cleaned_options,
-        "correct_answer": correct_answer
+        "correct_answer": correct_answer,
+        "correct_option_id": correct_option_id
     }
 
 # --- СОСТОЯНИЯ ДЛЯ БОТА ---
@@ -139,7 +140,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "   Где * — правильный ответ\n\n"
         "3. Выбери хэштег\n"
         "4. Отправь картинку\n"
-        "5. Бот опубликует в канал!\n\n"
+        "5. Бот опубликует **опрос** в канал!\n\n"
         "📩 **Просто текст** — сохраню в базу\n"
         "🎲 `/random` — случайная викторина\n"
         "📚 `/all` — все викторины"
@@ -163,7 +164,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     step = context.user_data.get('step')
     
-    # --- РЕЖИМ СОЗДАНИЯ ВИКТОРИНЫ ---
     if step == 'waiting_for_quiz_text':
         parsed = parse_quiz(text)
         
@@ -176,9 +176,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard.append([InlineKeyboardButton(hashtag, callback_data=f"hashtag_{hashtag}")])
             keyboard.append([InlineKeyboardButton("✏️ Свой хэштег", callback_data="hashtag_custom")])
             
+            # Показываем превью
+            options_preview = "\n".join([f"{i+1}. {opt}" for i, opt in enumerate(parsed['options'])])
             await update.message.reply_text(
-                f"✅ Вопрос: {parsed['question']}\n"
-                f"✅ Вариантов: {len(parsed['options'])}\n"
+                f"📝 **Превью викторины:**\n\n"
+                f"❓ {parsed['question']}\n\n"
+                f"{options_preview}\n\n"
                 f"✅ Правильный ответ: {parsed['correct_answer']}\n\n"
                 "🏷️ **Выбери хэштег:**",
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -256,10 +259,12 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         return
     
+    # Сохраняем в базу
     save_quiz(
         quiz_data['question'],
         ", ".join(quiz_data['options']),
         quiz_data['correct_answer'],
+        quiz_data['correct_option_id'],
         hashtag
     )
     
@@ -269,6 +274,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📤 Публикую в канал...")
     
     try:
+        # 1. Отправляем картинку с подписью
         caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\nТрясЛо №993 | Скинуть что-нибудь в предложку"
         
         await context.bot.send_photo(
@@ -277,12 +283,16 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption=caption
         )
         
-        options_text = "\n".join([f"{i+1}. {opt}" for i, opt in enumerate(quiz_data['options'])])
-        quiz_message = f"❓ {quiz_data['question']}\n\n{options_text}"
-        
-        await context.bot.send_message(
+        # 2. Отправляем ОПРОС (Poll)
+        await context.bot.send_poll(
             chat_id=CHANNEL_ID,
-            text=quiz_message
+            question=quiz_data['question'],
+            options=quiz_data['options'],
+            type="quiz",  # викторина (будет показан правильный ответ)
+            correct_option_id=quiz_data['correct_option_id'],  # индекс правильного ответа
+            is_anonymous=False,  # видно кто голосовал
+            explanation="Правильный ответ отмечен ✅ после голосования",
+            explanation_parse_mode="HTML"
         )
         
         await update.message.reply_text("✅ Викторина опубликована в канале!")
@@ -297,7 +307,7 @@ async def random_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 В базе пока нет викторин")
         return
     
-    question, options, correct_answer, hashtag = quiz
+    question, options, correct_answer, correct_option_id, hashtag = quiz
     options_list = options.split(", ") if options else []
     
     reply = f"🎲 **Случайная викторина:**\n\n"
