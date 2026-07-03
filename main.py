@@ -273,24 +273,27 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📤 Публикую в канал...")
     
     try:
-        caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\nТрясЛо №993 | Скинуть что-нибудь в предложку"
+        # 1. Картинка с подписью (гиперссылка)
+        caption = (
+            f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
+            f'<a href="https://t.me/your_channel">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
+        )
         
         await context.bot.send_photo(
             chat_id=CHANNEL_ID,
             photo=file_id,
-            caption=caption
+            caption=caption,
+            parse_mode="HTML"
         )
         
-        # ОПРОС — АНОНИМНЫЙ
+        # 2. Опрос (без объяснения)
         await context.bot.send_poll(
             chat_id=CHANNEL_ID,
             question=quiz_data['question'],
             options=quiz_data['options'],
             type="quiz",
             correct_option_id=quiz_data['correct_option_id'],
-            is_anonymous=True,  # <-- ИСПРАВЛЕНО
-            explanation="Правильный ответ отмечен ✅ после голосования",
-            explanation_parse_mode="HTML"
+            is_anonymous=True
         )
         
         await update.message.reply_text("✅ Викторина опубликована в канале!")
@@ -298,7 +301,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
-    
     # Сохраняем в базу
     save_quiz(
         quiz_data['question'],
