@@ -8,7 +8,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # --- ГЛОБАЛЬНЫЙ СПИСОК ДЛЯ ОТЛОЖЕННЫХ ПУБЛИКАЦИЙ ---
-scheduled_quizzes = []
 
 # --- КОНФИГИ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
@@ -29,6 +28,8 @@ HASHTAGS = [
     "#Мастерская_47",
     "#внесезонов"
 ]
+
+scheduled_quizzes = []
 
 # --- БАЗЫ ДАННЫХ ---
 def init_db():
