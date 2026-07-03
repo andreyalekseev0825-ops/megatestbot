@@ -1,4 +1,5 @@
 import sqlite3
+import os
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -64,6 +65,29 @@ def get_all():
         result.append((text, date_obj))
     return result
 
+def backup_db():
+    """Создаёт копию базы данных"""
+    if os.path.exists(DB_NAME):
+        # Создаём копию с временной меткой
+        backup_name = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        import shutil
+        shutil.copy2(DB_NAME, backup_name)
+        return backup_name
+    return None
+
+def restore_db(file_path):
+    """Восстанавливает базу из загруженного файла"""
+    try:
+        # Проверяем, что файл существует и это база данных
+        if os.path.exists(file_path) and file_path.endswith('.db'):
+            # Перемещаем файл на место основной базы
+            import shutil
+            shutil.copy2(file_path, DB_NAME)
+            return True
+    except Exception as e:
+        print(f"❌ Ошибка восстановления: {e}")
+    return False
+
 # --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -71,7 +95,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📩 Отправь текст — сохраню\n"
         "🔍 /find слово — поиск постов\n"
         "📚 /all — все посты\n"
-        "📊 /stats — статистика"
+        "📊 /stats — статистика\n"
+        "💾 /backup — скачать бэкап базы\n"
+        "📂 /restore — восстановить базу (отправь файл .db)"
     )
 
 async def save(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +123,6 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(f"🔍 **Найдено постов: {len(results)}**")
     
-    # Показываем каждый пост отдельно (максимум 5)
     for i, (text, date_obj) in enumerate(results[:5], 1):
         if date_obj:
             date_str = date_obj.strftime("%d.%m.%Y %H:%M")
@@ -107,7 +132,6 @@ async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
         header = f"📄 **Пост #{i}** (от {date_str}):\n\n"
         full_text = header + text
         
-        # Если текст длинный — разбиваем на части
         if len(full_text) > 4000:
             for chunk in [full_text[i:i+4000] for i in range(0, len(full_text), 4000)]:
                 await update.message.reply_text(chunk)
@@ -147,6 +171,74 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     posts = get_all()
     await update.message.reply_text(f"📊 **Всего постов в базе: {len(posts)}**")
 
+async def backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Создаёт бэкап базы и отправляет файл"""
+    await update.message.reply_text("💾 Создаю бэкап базы данных...")
+    
+    backup_file = backup_db()
+    if backup_file and os.path.exists(backup_file):
+        try:
+            # Отправляем файл
+            with open(backup_file, 'rb') as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=f"posts_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+                    caption="✅ Бэкап базы данных создан!"
+                )
+            # Удаляем временный файл после отправки
+            os.remove(backup_file)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка при отправке бэкапа: {e}")
+    else:
+        await update.message.reply_text("❌ База данных не найдена или пуста")
+
+async def restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Восстанавливает базу из отправленного файла"""
+    # Проверяем, есть ли в сообщении документ
+    if not update.message.document:
+        await update.message.reply_text(
+            "❌ Отправь файл базы данных (.db) командой /restore\n\n"
+            "Пример: отправь файл posts_backup_20260101_120000.db"
+        )
+        return
+    
+    document = update.message.document
+    
+    # Проверяем расширение файла
+    if not document.file_name.endswith('.db'):
+        await update.message.reply_text("❌ Файл должен иметь расширение .db")
+        return
+    
+    # Проверяем размер файла (не больше 20 МБ)
+    if document.file_size > 20 * 1024 * 1024:
+        await update.message.reply_text("❌ Файл слишком большой (максимум 20 МБ)")
+        return
+    
+    await update.message.reply_text("📥 Скачиваю файл базы данных...")
+    
+    try:
+        # Скачиваем файл
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        await file.download_to_drive(file_path)
+        
+        await update.message.reply_text("🔄 Восстанавливаю базу данных...")
+        
+        # Восстанавливаем базу
+        if restore_db(file_path):
+            # Удаляем временный файл
+            os.remove(file_path)
+            await update.message.reply_text("✅ База данных успешно восстановлена!")
+            
+            # Показываем статистику после восстановления
+            posts = get_all()
+            await update.message.reply_text(f"📊 Всего постов в базе: {len(posts)}")
+        else:
+            await update.message.reply_text("❌ Ошибка при восстановлении базы данных")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
 # --- ЗАПУСК ---
 def main():
     init_db()
@@ -156,6 +248,8 @@ def main():
     app.add_handler(CommandHandler("find", find))
     app.add_handler(CommandHandler("all", all_posts))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("backup", backup))
+    app.add_handler(CommandHandler("restore", restore))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, save))
     
     print("🤖 Бот запущен!")
