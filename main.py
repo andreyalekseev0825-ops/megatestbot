@@ -6,14 +6,14 @@ import shutil
 import asyncio
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler, JobQueue
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # --- КОНФИГ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 DB_NAME = 'posts.db'
 QUIZZES_DB = 'quizzes.db'
-CHANNEL_ID = "@trassa993"  # ЗАМЕНИ НА СВОЙ КАНАЛ
-SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ НА СВОЮ
+CHANNEL_ID = "@trassa993"
+SUGGESTION_LINK = "https://t.me/trassa993?direct"
 
 HASHTAGS = [
     "#Новое_поколение",
@@ -142,9 +142,56 @@ def parse_quiz(text):
         "correct_option_id": correct_option_id
     }
 
-# --- ОТЛОЖЕННАЯ ПУБЛИКАЦИЯ ---
+async def parse_datetime(text):
+    patterns = [
+        r'(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})',
+        r'(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})',
+        r'(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})',
+        r'(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})',
+    ]
+    
+    now = datetime.now()
+    
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            groups = match.groups()
+            
+            if len(groups) == 3:
+                date_str, hour, minute = groups
+                try:
+                    dt = datetime.strptime(date_str, '%Y-%m-%d')
+                    return dt.replace(hour=int(hour), minute=int(minute))
+                except:
+                    continue
+                    
+            elif len(groups) == 5:
+                day, month, year, hour, minute = groups
+                try:
+                    return datetime(int(year), int(month), int(day), int(hour), int(minute))
+                except:
+                    continue
+                    
+            elif len(groups) == 4:
+                if '.' in groups[0] or '.' in groups[1]:
+                    if '.' in groups[0]:
+                        day_month = groups[0].split('.')
+                        hour, minute = int(groups[2]), int(groups[3])
+                        day, month = int(day_month[0]), int(day_month[1])
+                        return datetime(now.year, month, day, hour, minute)
+                    elif '.' in groups[2]:
+                        day_month = groups[2].split('.')
+                        hour, minute = int(groups[0]), int(groups[1])
+                        day, month = int(day_month[0]), int(day_month[1])
+                        return datetime(now.year, month, day, hour, minute)
+                else:
+                    hour, minute = int(groups[0]), int(groups[1])
+                    day, month = int(groups[2]), int(groups[3])
+                    return datetime(now.year, month, day, hour, minute)
+    
+    return None
+
 async def publish_quiz(context: ContextTypes.DEFAULT_TYPE):
-    """Публикует викторину в канал по расписанию"""
     job_data = context.job.data
     chat_id = job_data['chat_id']
     quiz_data = job_data['quiz_data']
@@ -153,7 +200,7 @@ async def publish_quiz(context: ContextTypes.DEFAULT_TYPE):
     
     try:
         caption = (
-            f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
+            f"Викторина\n{hashtag}\n\n"
             f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
         )
         
@@ -178,59 +225,6 @@ async def publish_quiz(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"❌ Ошибка публикации: {e}")
 
-async def parse_datetime(text):
-    """Парсит дату и время из текста"""
-    # Форматы: "2026-07-15 14:30" или "15.07 14:30" или "14:30 15.07"
-    patterns = [
-        r'(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})',  # 2026-07-15 14:30
-        r'(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})',  # 15.07.2026 14:30
-        r'(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})',  # 15.07 14:30
-        r'(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})',  # 14:30 15.07
-    ]
-    
-    now = datetime.now()
-    
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            groups = match.groups()
-            
-            if len(groups) == 3:  # 2026-07-15 14:30
-                date_str, hour, minute = groups
-                try:
-                    dt = datetime.strptime(date_str, '%Y-%m-%d')
-                    return dt.replace(hour=int(hour), minute=int(minute))
-                except:
-                    continue
-                    
-            elif len(groups) == 5:  # 15.07.2026 14:30
-                day, month, year, hour, minute = groups
-                try:
-                    return datetime(int(year), int(month), int(day), int(hour), int(minute))
-                except:
-                    continue
-                    
-            elif len(groups) == 4:  # 15.07 14:30 или 14:30 15.07
-                if '.' in groups[0] or '.' in groups[1]:  # 15.07 14:30
-                    # Определяем что есть что
-                    if '.' in groups[0]:
-                        day_month = groups[0].split('.')
-                        hour, minute = int(groups[2]), int(groups[3])
-                        day, month = int(day_month[0]), int(day_month[1])
-                        return datetime(now.year, month, day, hour, minute)
-                    elif '.' in groups[2]:
-                        day_month = groups[2].split('.')
-                        hour, minute = int(groups[0]), int(groups[1])
-                        day, month = int(day_month[0]), int(day_month[1])
-                        return datetime(now.year, month, day, hour, minute)
-                else:
-                    # 14:30 15.07
-                    hour, minute = int(groups[0]), int(groups[1])
-                    day, month = int(groups[2]), int(groups[3])
-                    return datetime(now.year, month, day, hour, minute)
-    
-    return None
-
 # --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -239,16 +233,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. Напиши `/quiz`\n"
         "2. Отправь в формате:\n"
         "   `Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n\n"
-        "   Где * — правильный ответ\n\n"
         "3. Выбери хэштег\n"
         "4. Отправь картинку\n"
-        "5. **Укажи время публикации** (МСК)\n"
-        "   Например: `15.07 14:30` или `14:30 15.07`\n"
+        "5. **Укажи время публикации**\n"
         "6. Бот опубликует **опрос** в канал в указанное время!\n\n"
-        "📩 **Просто текст** — сохраню в базу\n"
         "🎲 `/random` — случайная викторина\n"
         "📚 `/all` — все викторины\n"
-        "💾 `/backup_quizzes` — скачать бэкап викторин"
+        "💾 `/backup_quizzes` — скачать бэкап"
     )
 
 async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -269,23 +260,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     step = context.user_data.get('step')
     
-    # --- РЕЖИМ ВВОДА ВРЕМЕНИ ---
     if step == 'waiting_for_time':
         dt = await parse_datetime(text)
         if dt:
             now = datetime.now()
             if dt < now:
-                await update.message.reply_text(
-                    "❌ Нельзя указать время в прошлом!\n"
-                    "Укажи время в будущем, например: `15.07 14:30`"
-                )
+                await update.message.reply_text("❌ Нельзя указать время в прошлом!")
                 return
             
-            # Сохраняем время публикации
             context.user_data['publish_time'] = dt
             context.user_data['step'] = 'waiting_for_confirmation'
             
-            # Показываем подтверждение
             quiz_data = context.user_data.get('quiz_data')
             hashtag = context.user_data.get('quiz_hashtag')
             
@@ -305,13 +290,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "❌ Не понял формат времени.\n\n"
                 "Примеры:\n"
-                "`15.07 14:30` — 15 июля в 14:30\n"
-                "`14:30 15.07` — 15 июля в 14:30\n"
-                "`2026-07-15 14:30` — 15 июля 2026 в 14:30"
+                "`15.07 14:30`\n"
+                "`2026-07-15 14:30`"
             )
         return
     
-    # --- РЕЖИМ ВВОДА ВИКТОРИНЫ ---
     if step == 'waiting_for_quiz_text':
         parsed = parse_quiz(text)
         
@@ -337,12 +320,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "❌ Неправильный формат.\n\n"
                 "Нужно:\n"
-                "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n\n"
-                "Где * — правильный ответ"
+                "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`"
             )
         return
     
-    # --- ОБЫЧНЫЙ ТЕКСТ ---
+    # Обычный текст
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('INSERT INTO posts (text, date) VALUES (?, ?)', 
@@ -370,12 +352,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await query.edit_message_text(
             f"✅ Хэштег: {hashtag}\n\n"
-            "🖼️ **Отправь картинку** для поста (обложка викторины).\n\n"
+            "🖼️ **Отправь картинку** для поста.\n\n"
             "После картинки укажи время публикации."
         )
     
     elif data == "confirm_publish":
-        # Проверяем, что всё есть
         quiz_data = context.user_data.get('quiz_data')
         hashtag = context.user_data.get('quiz_hashtag')
         file_id = context.user_data.get('file_id')
@@ -386,7 +367,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             return
         
-        # Сохраняем викторину в базу
         save_quiz(
             quiz_data['question'],
             ", ".join(quiz_data['options']),
@@ -395,8 +375,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             hashtag
         )
         
-        # Планируем публикацию
-        job_queue = context.job_queue
+        # Проверяем JobQueue
+        if context.job_queue is None:
+            await query.edit_message_text(
+                "❌ Ошибка: JobQueue не инициализирован.\n"
+                "Перезапусти бота."
+            )
+            return
+        
         job_data = {
             'chat_id': CHANNEL_ID,
             'quiz_data': quiz_data,
@@ -404,7 +390,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'file_id': file_id
         }
         
-        job_queue.run_once(
+        context.job_queue.run_once(
             publish_quiz,
             when=publish_time,
             data=job_data,
@@ -419,7 +405,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
     
     elif data == "cancel_publish":
-        await query.edit_message_text("❌ Публикация отменена. Начни заново через /quiz")
+        await query.edit_message_text("❌ Публикация отменена.")
         context.user_data.clear()
 
 async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -447,7 +433,6 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Отправь именно картинку")
         return
     
-    # Сохраняем file_id картинки
     photo = update.message.photo[-1]
     context.user_data['file_id'] = photo.file_id
     context.user_data['step'] = 'waiting_for_time'
@@ -455,8 +440,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🖼️ Картинка сохранена!\n\n"
         "📅 **Укажи время публикации** (МСК):\n"
-        "Например: `15.07 14:30` или `14:30 15.07`\n\n"
-        "Также можно указать год: `15.07.2026 14:30`"
+        "Например: `15.07 14:30` или `14:30 15.07`"
     )
 
 async def backup_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -475,24 +459,16 @@ async def backup_quizzes_command(update: Update, context: ContextTypes.DEFAULT_T
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка при отправке: {e}")
     else:
-        await update.message.reply_text("❌ База викторин не найдена или пуста")
+        await update.message.reply_text("❌ База викторин не найдена")
 
 async def restore_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.document:
-        await update.message.reply_text(
-            "❌ Отправь файл базы данных (.db) с викторинами\n\n"
-            "Пример: quizzes_backup_20260101_120000.db"
-        )
+        await update.message.reply_text("❌ Отправь файл .db с викторинами")
         return
     
     document = update.message.document
-    
     if not document.file_name.endswith('.db'):
         await update.message.reply_text("❌ Файл должен иметь расширение .db")
-        return
-    
-    if document.file_size > 20 * 1024 * 1024:
-        await update.message.reply_text("❌ Файл слишком большой (максимум 20 МБ)")
         return
     
     await update.message.reply_text("📥 Восстанавливаю викторины...")
@@ -505,7 +481,6 @@ async def restore_quizzes_command(update: Update, context: ContextTypes.DEFAULT_
         if restore_quizzes(file_path):
             os.remove(file_path)
             await update.message.reply_text("✅ База викторин восстановлена!")
-            
             quizzes = get_all_quizzes()
             await update.message.reply_text(f"📊 Всего викторин в базе: {len(quizzes)}")
         else:
