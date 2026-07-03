@@ -178,7 +178,7 @@ def publish_quiz_delayed(bot, chat_id, file_id, quiz_data, hashtag):
     
     try:
         caption = (
-            f/"Викторина\n{hashtag}\n\n"
+            f"Викторина\n{hashtag}\n\n"
             f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
         )
         
