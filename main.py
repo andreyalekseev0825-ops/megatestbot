@@ -346,18 +346,54 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🖼️ Отправь картинку для поста.\n\n"
             "После картинки укажи время публикации."
         )
+
+        elif data == "confirm_publish":
+    quiz_data = context.user_data.get('quiz_data')
+    hashtag = context.user_data.get('quiz_hashtag')
+    file_id = context.user_data.get('file_id')
+    publish_time = context.user_data.get('publish_time')
     
-    elif data == "confirm_publish":
-        quiz_data = context.user_data.get('quiz_data')
-        hashtag = context.user_data.get('quiz_hashtag')
-        file_id = context.user_data.get('file_id')
-        publish_time = context.user_data.get('publish_time')
-        
-        if not quiz_data or not hashtag or not file_id or not publish_time:
-            await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
-            context.user_data.clear()
-            return
-        
+    if not quiz_data or not hashtag or not file_id or not publish_time:
+        await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
+        context.user_data.clear()
+        return
+    
+    # Сохраняем в базу
+    save_quiz(
+        quiz_data['question'],
+        ", ".join(quiz_data['options']),
+        quiz_data['correct_answer'],
+        quiz_data['correct_option_id'],
+        hashtag
+    )
+    
+    # ВМЕСТО ТАЙМЕРА — ДОБАВЛЯЕМ В СПИСОК
+    caption = (
+        f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
+        f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
+    )
+    
+    scheduled_quizzes.append({
+        'chat_id': CHANNEL_ID,
+        'file_id': file_id,
+        'quiz_data': quiz_data,
+        'hashtag': hashtag,
+        'caption': caption,
+        'publish_time': publish_time
+    })
+    
+    delay = int((publish_time - datetime.now()).total_seconds())
+    
+    await query.edit_message_text(
+        f"✅ Викторина запланирована на **{publish_time.strftime('%d.%m.%Y в %H:%M')}** МСК!\n\n"
+        f"⏳ Осталось: {delay} секунд\n\n"
+        "В указанное время она автоматически появится в канале. 🚀"
+    )
+    
+    context.user_data.clear()
+    
+    
+    
         # Сохраняем в базу
         save_quiz(
             quiz_data['question'],
@@ -473,12 +509,52 @@ async def all_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(reply)
 
+async def check_scheduled_quizzes(context: ContextTypes.DEFAULT_TYPE):
+    """Проверяет каждую минуту, не пора ли опубликовать"""
+    now = datetime.now()
+    to_publish = []
+    
+    # Ищем викторины, которые пора публиковать
+    for i, job in enumerate(scheduled_quizzes):
+        if job['publish_time'] <= now:
+            to_publish.append(job)
+    
+    # Удаляем их из списка
+    for job in to_publish:
+        scheduled_quizzes.remove(job)
+    
+    # Публикуем
+    for job in to_publish:
+        try:
+            # Отправляем фото
+            await context.bot.send_photo(
+                chat_id=job['chat_id'],
+                photo=job['file_id'],
+                caption=job['caption'],
+                parse_mode="HTML"
+            )
+            # Отправляем опрос
+            await context.bot.send_poll(
+                chat_id=job['chat_id'],
+                question=job['quiz_data']['question'],
+                options=job['quiz_data']['options'],
+                type="quiz",
+                correct_option_id=job['quiz_data']['correct_option_id'],
+                is_anonymous=True
+            )
+            print(f"✅ Викторина опубликована: {job['quiz_data']['question'][:30]}...")
+        except Exception as e:
+            print(f"❌ Ошибка публикации: {e}")
+
 # --- ЗАПУСК ---
 def main():
     init_db()
     init_quizzes_db()
     
     app = Application.builder().token(BOT_TOKEN).build()
+
+    job_queue = app.job_queue
+    job_queue.run_repeating(check_scheduled_quizzes, interval=60, first=10)
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("quiz", start_quiz))
