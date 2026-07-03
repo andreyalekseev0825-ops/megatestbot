@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
-
+scheduled_quizzes = []
 # --- КОНФИГ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 DB_NAME = 'posts.db'
@@ -318,7 +318,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     await update.message.reply_text("✅ Текст сохранён!")
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
+    async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
@@ -346,18 +348,57 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🖼️ Отправь картинку для поста.\n\n"
             "После картинки укажи время публикации."
         )
-
-        elif data == "confirm_publish":
-    quiz_data = context.user_data.get('quiz_data')
-    hashtag = context.user_data.get('quiz_hashtag')
-    file_id = context.user_data.get('file_id')
-    publish_time = context.user_data.get('publish_time')
     
-    if not quiz_data or not hashtag or not file_id or not publish_time:
-        await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
+    elif data == "confirm_publish":
+        quiz_data = context.user_data.get('quiz_data')
+        hashtag = context.user_data.get('quiz_hashtag')
+        file_id = context.user_data.get('file_id')
+        publish_time = context.user_data.get('publish_time')
+        
+        if not quiz_data or not hashtag or not file_id or not publish_time:
+            await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
+            context.user_data.clear()
+            return
+        
+        # Сохраняем в базу
+        save_quiz(
+            quiz_data['question'],
+            ", ".join(quiz_data['options']),
+            quiz_data['correct_answer'],
+            quiz_data['correct_option_id'],
+            hashtag
+        )
+        
+        # Формируем подпись к картинке
+        caption = (
+            f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
+            f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
+        )
+        
+        # Добавляем в список запланированных
+        scheduled_quizzes.append({
+            'chat_id': CHANNEL_ID,
+            'file_id': file_id,
+            'quiz_data': quiz_data,
+            'hashtag': hashtag,
+            'caption': caption,
+            'publish_time': publish_time
+        })
+        
+        delay = int((publish_time - datetime.now()).total_seconds())
+        
+        await query.edit_message_text(
+            f"✅ Викторина запланирована на **{publish_time.strftime('%d.%m.%Y в %H:%M')}** МСК!\n\n"
+            f"⏳ Осталось: {delay} секунд\n\n"
+            "В указанное время она автоматически появится в канале. 🚀"
+        )
+        
         context.user_data.clear()
-        return
     
+    elif data == "cancel_publish":
+        await query.edit_message_text("❌ Публикация отменена.")
+        context.user_data.clear()
+        
     # Сохраняем в базу
     save_quiz(
         quiz_data['question'],
