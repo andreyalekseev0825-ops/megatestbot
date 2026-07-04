@@ -588,7 +588,7 @@ async def backup_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 # --- ЗАПУСК ---
 def main():
     init_db()
-    init_base_db()2
+    init_base_db()
     
     # Запускаем фоновый поток для проверки расписания
     scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
