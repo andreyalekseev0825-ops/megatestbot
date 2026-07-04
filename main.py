@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # --- КОНФИГИ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
-CHANNEL_ID = "@tryaslos"  # ЗАМЕНИ
+CHANNEL_ID = "@trassa993"  # ЗАМЕНИ
 SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ
 QUIZZES_DB = 'quizzes.db'
 BASE_QUIZZES_DB = 'basequizzes.db'
