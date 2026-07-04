@@ -10,7 +10,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 CHANNEL_ID = "@tryaslos"  # ЗАМЕНИ
 SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ
-DELAY_SECONDS = 60  # ЧЕРЕЗ СКОЛЬКО СЕКУНД ПУБЛИКОВАТЬ
+DELAY_SECONDS = 60
 
 HASHTAGS = [
     "#Новое_поколение",
@@ -36,21 +36,32 @@ def parse_quiz(text):
     options = [opt.strip() for opt in match.group(2).split(';') if opt.strip()]
     if len(options) < 2:
         return None
+    
+    correct_answer = None
     correct_option_id = None
     cleaned = []
+    
     for i, opt in enumerate(options):
         if opt.endswith('*'):
+            correct_answer = opt[:-1].strip()
             correct_option_id = i
-            cleaned.append(opt[:-1].strip())
+            cleaned.append(correct_answer)
         else:
             cleaned.append(opt)
+    
     if correct_option_id is None:
+        correct_answer = cleaned[0]
         correct_option_id = 0
-    return {"question": question, "options": cleaned, "correct_option_id": correct_option_id}
+    
+    return {
+        "question": question,
+        "options": cleaned,
+        "correct_answer": correct_answer,
+        "correct_option_id": correct_option_id
+    }
 
-# --- ФУНКЦИЯ ПУБЛИКАЦИИ (запускается в потоке) ---
+# --- ФУНКЦИЯ ПУБЛИКАЦИИ ---
 def publish_quiz_delayed(chat_id, file_id, quiz_data, hashtag):
-    """Ждёт DELAY_SECONDS секунд и публикует"""
     try:
         print(f"⏳ Таймер запущен на {DELAY_SECONDS} секунд")
         time.sleep(DELAY_SECONDS)
@@ -117,7 +128,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard.append([InlineKeyboardButton("✏️ Свой", callback_data="hashtag_custom")])
             
             await update.message.reply_text(
-                f"❓ {parsed['question']}\n\n✅ Правильный ответ: {parsed['correct_answer']}\n\n🏷️ Выбери хэштег:",
+                f"❓ {parsed['question']}\n\n"
+                f"✅ Правильный ответ: {parsed['correct_answer']}\n\n"
+                "🏷️ Выбери хэштег:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
