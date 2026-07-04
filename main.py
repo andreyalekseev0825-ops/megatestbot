@@ -1,15 +1,15 @@
+
 import sqlite3
 import os
 import random
 import re
 import threading
 import time
-import asyncio
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
-# --- ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ ДЛЯ ПРИЛОЖЕНИЯ ---
+# --- ГЛОБАЛЬНАЯ ПЕРЕМЕННАЯ ---
 app_instance = None
 
 # --- КОНФИГИ ---
@@ -231,6 +231,53 @@ def parse_datetime(text):
     
     return None
 
+# --- ФУНКЦИЯ ПРОВЕРКИ РАСПИСАНИЯ ---
+def check_scheduled_background():
+    """Фоновая проверка расписания (использует существующего бота)"""
+    global app_instance
+    while True:
+        try:
+            due = get_due_quizzes()
+            for row in due:
+                quiz_id, question, options, correct_option_id, hashtag, file_id, publish_time_str = row
+                options_list = options.split(", ") if options else []
+                
+                try:
+                    # ИСПОЛЬЗУЕМ СУЩЕСТВУЮЩЕГО БОТА ИЗ ПРИЛОЖЕНИЯ
+                    bot = app_instance.bot
+                    
+                    caption = (
+                        f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
+                        f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
+                    )
+                    
+                    bot.send_photo(
+                        chat_id=CHANNEL_ID,
+                        photo=file_id,
+                        caption=caption,
+                        parse_mode="HTML"
+                    )
+                    
+                    bot.send_poll(
+                        chat_id=CHANNEL_ID,
+                        question=question,
+                        options=options_list,
+                        type="quiz",
+                        correct_option_id=correct_option_id,
+                        is_anonymous=True
+                    )
+                    
+                    delete_scheduled(quiz_id)
+                    print(f"✅ Викторина опубликована: {question[:30]}...")
+                    
+                except Exception as e:
+                    print(f"❌ Ошибка публикации: {e}")
+                    
+        except Exception as e:
+            print(f"❌ Ошибка проверки расписания: {e}")
+        
+        time.sleep(30)  # Проверяем каждые 30 секунд
+
 # --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -362,7 +409,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.clear()
             return
         
-        # Сохраняем в основную базу
         save_quiz(
             quiz_data['question'],
             ", ".join(quiz_data['options']),
@@ -371,7 +417,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             hashtag
         )
         
-        # Сохраняем в расписание
         add_scheduled(
             quiz_data['question'],
             ", ".join(quiz_data['options']),
@@ -467,60 +512,19 @@ async def all_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(reply)
 
-# --- ФУНКЦИЯ ПРОВЕРКИ РАСПИСАНИЯ (вызывается в фоновом потоке) ---
-def check_scheduled_background():
-    """Фоновая проверка расписания"""
-    while True:
-        try:
-            due = get_due_quizzes()
-            for row in due:
-                quiz_id, question, options, correct_option_id, hashtag, file_id, publish_time_str = row
-                options_list = options.split(", ") if options else []
-                
-                try:
-                    caption = (
-                        f"🎯 ВИКТОРИНА\n{hashtag}\n\n"
-                        f'<a href="{SUGGESTION_LINK}">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>'
-                    )
-                    
-                    # Используем глобальный bot
-                    bot = Bot(token=BOT_TOKEN)
-                    bot.send_photo(
-                        chat_id=CHANNEL_ID,
-                        photo=file_id,
-                        caption=caption,
-                        parse_mode="HTML"
-                    )
-                    bot.send_poll(
-                        chat_id=CHANNEL_ID,
-                        question=question,
-                        options=options_list,
-                        type="quiz",
-                        correct_option_id=correct_option_id,
-                        is_anonymous=True
-                    )
-                    
-                    delete_scheduled(quiz_id)
-                    print(f"✅ Викторина опубликована: {question[:30]}...")
-                    
-                except Exception as e:
-                    print(f"❌ Ошибка публикации: {e}")
-        except Exception as e:
-            print(f"❌ Ошибка проверки расписания: {e}")
-        
-        time.sleep(30)  # Проверяем каждые 30 секунд
-
 # --- ЗАПУСК ---
 def main():
+    global app_instance
     init_db()
     init_quizzes_db()
+    
+    app = Application.builder().token(BOT_TOKEN).build()
+    app_instance = app  # СОХРАНЯЕМ ДЛЯ ФОНОВОГО ПОТОКА
     
     # Запускаем фоновый поток для проверки расписания
     scheduler_thread = threading.Thread(target=check_scheduled_background, daemon=True)
     scheduler_thread.start()
     print("🕐 Фоновый планировщик запущен (проверка каждые 30 секунд)")
-    
-    app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("quiz", start_quiz))
