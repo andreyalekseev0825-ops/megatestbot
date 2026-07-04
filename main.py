@@ -4,6 +4,7 @@ import requests
 import threading
 import sqlite3
 import shutil
+import os
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -438,7 +439,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def backup_quizzes():
-    """Создаёт бэкап базы данных и отправляет файл"""
+    """Создаёт бэкап базы данных"""
     if os.path.exists(QUIZZES_DB):
         backup_name = f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         shutil.copy2(QUIZZES_DB, backup_name)
@@ -449,21 +450,26 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /backup — скачать бэкап базы"""
     await update.message.reply_text("💾 Создаю бэкап базы данных...")
     
-    backup_file = backup_quizzes()
-    if backup_file and os.path.exists(backup_file):
-        try:
-            with open(backup_file, 'rb') as f:
-                await update.message.reply_document(
-                    document=f,
-                    filename=f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
-                    caption="✅ Бэкап базы данных создан!"
-                )
-            os.remove(backup_file)
-        except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка при отправке: {e}")
-    else:
-        await update.message.reply_text("❌ База данных не найдена")
-
+    try:
+        backup_file = backup_quizzes()
+        
+        if not backup_file or not os.path.exists(backup_file):
+            await update.message.reply_text("❌ База данных не найдена или пуста.")
+            return
+        
+        # Отправляем файл
+        with open(backup_file, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                filename=os.path.basename(backup_file),
+                caption="✅ Бэкап базы данных создан!"
+            )
+        
+        # Удаляем временный файл после отправки
+        os.remove(backup_file)
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при создании бэкапа: {e}")
 # --- ЗАПУСК ---
 def main():
     init_db()
