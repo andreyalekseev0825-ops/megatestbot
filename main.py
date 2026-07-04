@@ -15,6 +15,7 @@ BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
 CHANNEL_ID = "@tryaslos"  # ЗАМЕНИ
 SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ
 QUIZZES_DB = 'quizzes.db'
+BASE_QUIZZES_DB = 'basequizzes.db'
 
 HASHTAGS = [
     "#Новое_поколение", "#Игра_бога", "#Идеальный_мир", "#Голос_времени",
@@ -207,6 +208,40 @@ def parse_quiz(text):
         correct_option_id = 0
     return {"question": question, "options": cleaned, "correct_option_id": correct_option_id}
 
+def init_base_db():
+    conn = sqlite3.connect(BASE_QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS base_quizzes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question TEXT,
+            options TEXT,
+            correct_option_id INTEGER,
+            date TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    print("✅ База базовых вопросов готова")
+
+def save_base_quiz(question, options, correct_option_id):
+    conn = sqlite3.connect(BASE_QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO base_quizzes (question, options, correct_option_id, date)
+        VALUES (?, ?, ?, ?)
+    ''', (question, options, correct_option_id, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    print(f"✅ Базовый вопрос сохранён: {question[:30]}...")
+
+def backup_base_quizzes():
+    if os.path.exists(BASE_QUIZZES_DB):
+        backup_name = f"base_quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        shutil.copy2(BASE_QUIZZES_DB, backup_name)
+        return backup_name
+    return None
+
 # --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -263,6 +298,21 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`Как зовут персонажа (Глен; Ашра; Кацпер; Воланд*)`"
     )
 
+
+    
+            
+        
+            context.user_data['publish_time'] = dt
+            context.user_data['step'] = 'waiting_for_confirmation'
+            
+            delay = int((dt - now).total_seconds())
+            msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
+            
+            keyboard = [
+                [InlineKeyboardButton("✅ Запланировать", callback_data="confirm_publish")],
+                [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
+            ]
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if not text:
@@ -271,6 +321,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     step = context.user_data.get('step')
     
+    # --- ШАГ 1: БАЗОВЫЙ ВОПРОС (/basequiz) ---
+    if step == 'waiting_for_base_quiz_text':
+        parsed = parse_quiz(text)
+        if parsed and len(parsed['options']) >= 2:
+            save_base_quiz(parsed['question'], '|||'.join(parsed['options']), parsed['correct_option_id'])
+            await update.message.reply_text(
+                f"✅ Вопрос сохранён в базовую базу!\n\n"
+                f"❓ {parsed['question']}\n"
+                f"📊 Вариантов: {len(parsed['options'])}\n"
+                f"✅ Правильный ответ: {parsed['options'][parsed['correct_option_id']]}"
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Неправильный формат.\n\n"
+                "Нужно: `Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
+                "Где * — правильный ответ"
+            )
+        context.user_data['step'] = None
+        return
+    
+    # --- ШАГ 2: ТЕКСТ ВИКТОРИНЫ (/quiz) ---
     if step == 'waiting_for_quiz_text':
         parsed = parse_quiz(text)
         if parsed and len(parsed['options']) >= 2:
@@ -289,9 +360,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
-            await update.message.reply_text("❌ Неправильный формат. Пример: `Вопрос (А; Б*; В; Г)`")
+            await update.message.reply_text(
+                "❌ Неправильный формат.\n\n"
+                "Нужно: `Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
+                "Где * — правильный ответ"
+            )
         return
     
+    # --- ШАГ 3: ВРЕМЯ ПУБЛИКАЦИИ ---
     if step == 'waiting_for_time':
         dt = parse_datetime(text)
         if dt:
@@ -332,7 +408,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
     
-    await update.message.reply_text("✅ Текст сохранён!")
+    # --- ШАГ 4: СВОЙ ХЭШТЕГ ---
+    if step == 'waiting_for_custom_hashtag':
+        text = text.strip()
+        if not text.startswith('#'):
+            text = '#' + text
+        context.user_data['quiz_hashtag'] = text
+        context.user_data['step'] = 'waiting_for_image'
+        await update.message.reply_text(
+            f"✅ Хэштег: {text}\n\n"
+            "🖼️ Отправь картинку для поста.\n\n"
+            "После картинки укажи время публикации (например, 20:33)"
+        )
+        return
+    
+    # --- ЛЮБОЙ ДРУГОЙ ТЕКСТ ---
+    await update.message.reply_text(
+        "❓ Я не понял.\n\n"
+        "Доступные команды:\n"
+        "/quiz — создать викторину\n"
+        "/basequiz — добавить вопрос в базу\n"
+        "/my — мои запланированные викторины\n"
+        "/cancel_all — отменить все мои викторины\n"
+        "/backup — бэкап основной базы\n"
+        "/backupbase — бэкап базы вопросов"
+    )
+            
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -470,9 +571,38 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка при создании бэкапа: {e}")
+
+async def base_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['step'] = 'waiting_for_base_quiz_text'
+    await update.message.reply_text(
+        "📝 Отправь вопрос в формате:\n"
+        "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
+        "Где * — правильный ответ"
+    )
+
+async def backup_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💾 Создаю бэкап базы базовых вопросов...")
+    
+    try:
+        backup_file = backup_base_quizzes()
+        if not backup_file or not os.path.exists(backup_file):
+            await update.message.reply_text("❌ База базовых вопросов не найдена.")
+            return
+        
+        with open(backup_file, 'rb') as f:
+            await update.message.reply_document(
+                document=f,
+                filename=os.path.basename(backup_file),
+                caption="✅ Бэкап базовых вопросов создан!"
+            )
+        os.remove(backup_file)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+    
 # --- ЗАПУСК ---
 def main():
     init_db()
+    init_base_db()2
     
     # Запускаем фоновый поток для проверки расписания
     scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
@@ -492,6 +622,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(CommandHandler("backup", backup_command))
+    app.add_handler(CommandHandler("basequiz", base_quiz_command))
+    app.add_handler(CommandHandler("backupbase", backup_base_command))
     
     print("🤖 Бот запущен!")
     print(f"📅 Текущее время (МСК): {(datetime.now() + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')}")
