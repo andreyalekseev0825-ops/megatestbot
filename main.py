@@ -3,9 +3,11 @@ import re
 import requests
 import threading
 import sqlite3
+import shutil
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+
 
 # --- КОНФИГИ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
@@ -114,7 +116,7 @@ def scheduler_loop():
                 options_list = options.split('|||') if options else []
                 
                 try:
-                    caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+                    caption = f"Викторина\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
                     
                     # Отправляем фото
                     url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
@@ -435,6 +437,33 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Например: `20:33` или `15.07 20:33`"
     )
 
+def backup_quizzes():
+    """Создаёт бэкап базы данных и отправляет файл"""
+    if os.path.exists(QUIZZES_DB):
+        backup_name = f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        shutil.copy2(QUIZZES_DB, backup_name)
+        return backup_name
+    return None
+
+async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /backup — скачать бэкап базы"""
+    await update.message.reply_text("💾 Создаю бэкап базы данных...")
+    
+    backup_file = backup_quizzes()
+    if backup_file and os.path.exists(backup_file):
+        try:
+            with open(backup_file, 'rb') as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db",
+                    caption="✅ Бэкап базы данных создан!"
+                )
+            os.remove(backup_file)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка при отправке: {e}")
+    else:
+        await update.message.reply_text("❌ База данных не найдена")
+
 # --- ЗАПУСК ---
 def main():
     init_db()
@@ -456,6 +485,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
+    app.add_handler(CommandHandler("backup", backup_command))
     
     print("🤖 Бот запущен!")
     print(f"📅 Текущее время (МСК): {(datetime.now() + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')}")
