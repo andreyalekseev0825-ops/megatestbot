@@ -298,21 +298,7 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`Как зовут персонажа (Глен; Ашра; Кацпер; Воланд*)`"
     )
 
-
-    
-            
-        
-            context.user_data['publish_time'] = dt
-            context.user_data['step'] = 'waiting_for_confirmation'
-            
-            delay = int((dt - now).total_seconds())
-            msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
-            
-            keyboard = [
-                [InlineKeyboardButton("✅ Запланировать", callback_data="confirm_publish")],
-                [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
-            ]
-
+                      
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if not text:
