@@ -1,60 +1,33 @@
 import sqlite3
-import re
 import threading
 import time
-from datetime import datetime, timedelta
+import re
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
+# --- КОНФИГИ ---
 BOT_TOKEN = "8798378718:AAEmRvVmnWBKCDu_sHQY8bvVhclnMwUmnFM"
-CHANNEL_ID = "@tryaslos"
-SUGGESTION_LINK = "https://t.me/trassa993?direct"
-QUIZZES_DB = 'quizzes.db'
+CHANNEL_ID = "@tryaslos"  # ЗАМЕНИ
+SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ
+DELAY_SECONDS = 60  # ЧЕРЕЗ СКОЛЬКО СЕКУНД ПУБЛИКОВАТЬ
+
+HASHTAGS = [
+    "#Новое_поколение",
+    "#Игра_бога",
+    "#Идеальный_мир",
+    "#Голос_времени",
+    "#Тринадцать_огней",
+    "#Последняя_реальность",
+    "#Сердце_вселенной",
+    "#Точка_невозврата",
+    "#Мастерская_47",
+    "#внесезонов"
+]
 
 app_instance = None
 
-def init_db():
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    c.execute('CREATE TABLE IF NOT EXISTS scheduled (id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT, options TEXT, correct_option_id INTEGER, hashtag TEXT, file_id TEXT, publish_time TEXT)')
-    conn.commit()
-    conn.close()
-
-def add_scheduled(question, options, correct_option_id, hashtag, file_id, publish_time):
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    c.execute('INSERT INTO scheduled (question, options, correct_option_id, hashtag, file_id, publish_time) VALUES (?, ?, ?, ?, ?, ?)',
-              (question, options, correct_option_id, hashtag, file_id, publish_time.isoformat()))
-    conn.commit()
-    conn.close()
-    print(f"✅ Добавлено в расписание: {question[:30]}... на {publish_time}")
-
-def get_due_quizzes():
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    c.execute('SELECT id, question, options, correct_option_id, hashtag, file_id, publish_time FROM scheduled WHERE publish_time <= ?', (datetime.now().isoformat(),))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def delete_scheduled(quiz_id):
-    conn = sqlite3.connect(QUIZZES_DB)
-    c = conn.cursor()
-    c.execute('DELETE FROM scheduled WHERE id = ?', (quiz_id,))
-    conn.commit()
-    conn.close()
-
-def parse_datetime(text):
-    now = datetime.now()
-    match = re.search(r'(\d{1,2}):(\d{2})', text)
-    if match:
-        hour, minute = int(match.group(1)), int(match.group(2))
-        dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if dt < now:
-            dt = dt + timedelta(days=1)
-        return dt
-    return None
-
+# --- ПАРСИНГ ---
 def parse_quiz(text):
     match = re.match(r'^(.+?)\s*\((.+)\)\s*$', text.strip())
     if not match:
@@ -75,95 +48,204 @@ def parse_quiz(text):
         correct_option_id = 0
     return {"question": question, "options": cleaned, "correct_option_id": correct_option_id}
 
-def check_scheduled():
-    while True:
-        try:
-            due = get_due_quizzes()
-            if due:
-                print(f"🔄 Найдено {len(due)} викторин для публикации")
-            for row in due:
-                quiz_id, question, options, correct_option_id, hashtag, file_id, publish_time = row
-                try:
-                    bot = app_instance.bot
-                    caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
-                    bot.send_photo(chat_id=CHANNEL_ID, photo=file_id, caption=caption, parse_mode="HTML")
-                    bot.send_poll(chat_id=CHANNEL_ID, question=question, options=options.split(', '), type="quiz", correct_option_id=correct_option_id, is_anonymous=True)
-                    delete_scheduled(quiz_id)
-                    print(f"✅ Опубликовано: {question[:30]}...")
-                except Exception as e:
-                    print(f"❌ Ошибка публикации: {e}")
-        except Exception as e:
-            print(f"❌ Ошибка проверки: {e}")
-        time.sleep(30)
+# --- ФУНКЦИЯ ПУБЛИКАЦИИ (запускается в потоке) ---
+def publish_quiz_delayed(chat_id, file_id, quiz_data, hashtag):
+    """Ждёт DELAY_SECONDS секунд и публикует"""
+    try:
+        print(f"⏳ Таймер запущен на {DELAY_SECONDS} секунд")
+        time.sleep(DELAY_SECONDS)
+        
+        bot = app_instance.bot
+        caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+        
+        bot.send_photo(
+            chat_id=chat_id,
+            photo=file_id,
+            caption=caption,
+            parse_mode="HTML"
+        )
+        
+        bot.send_poll(
+            chat_id=chat_id,
+            question=quiz_data['question'],
+            options=quiz_data['options'],
+            type="quiz",
+            correct_option_id=quiz_data['correct_option_id'],
+            is_anonymous=True
+        )
+        
+        print(f"✅ ВИКТОРИНА ОПУБЛИКОВАНА: {quiz_data['question'][:30]}...")
+        
+    except Exception as e:
+        print(f"❌ ОШИБКА ПУБЛИКАЦИИ: {e}")
 
-async def start(update, context):
-    await update.message.reply_text("👋 Бот для викторин. /quiz — создать.")
+# --- ОБРАБОТЧИКИ ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Бот для викторин\n\n"
+        "📝 Создать викторину: /quiz\n"
+        "После подтверждения викторина опубликуется через 60 секунд"
+    )
 
-async def start_quiz(update, context):
+async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['step'] = 'waiting_for_quiz_text'
-    await update.message.reply_text("📝 Отправь: `Вопрос (А; Б*; В; Г)`")
+    await update.message.reply_text(
+        "📝 Отправь в формате:\n"
+        "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
+        "Где * — правильный ответ\n\n"
+        "Пример:\n"
+        "`Как зовут персонажа (Глен; Ашра; Кацпер; Воланд*)`"
+    )
 
-async def handle_message(update, context):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    if not text:
+        await update.message.reply_text("❌ Отправь текст")
+        return
+    
     step = context.user_data.get('step')
+    
     if step == 'waiting_for_quiz_text':
         parsed = parse_quiz(text)
-        if parsed:
+        if parsed and len(parsed['options']) >= 2:
             context.user_data['quiz_data'] = parsed
             context.user_data['step'] = 'waiting_for_hashtag'
-            keyboard = [[InlineKeyboardButton(h, callback_data=f"h_{h}")] for h in ["#Новое_поколение", "#Игра_бога", "#Идеальный_мир"]]
-            await update.message.reply_text("Выбери хэштег:", reply_markup=InlineKeyboardMarkup(keyboard))
+            
+            keyboard = []
+            for hashtag in HASHTAGS:
+                keyboard.append([InlineKeyboardButton(hashtag, callback_data=f"hashtag_{hashtag}")])
+            keyboard.append([InlineKeyboardButton("✏️ Свой", callback_data="hashtag_custom")])
+            
+            await update.message.reply_text(
+                f"❓ {parsed['question']}\n\n✅ Правильный ответ: {parsed['correct_answer']}\n\n🏷️ Выбери хэштег:",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
         else:
-            await update.message.reply_text("❌ Неверный формат")
+            await update.message.reply_text("❌ Неправильный формат. Пример: `Вопрос (А; Б*; В; Г)`")
         return
-    if step == 'waiting_for_time':
-        dt = parse_datetime(text)
-        if dt:
-            context.user_data['publish_time'] = dt
-            context.user_data['step'] = 'waiting_for_confirmation'
-            keyboard = [[InlineKeyboardButton("✅ Подтвердить", callback_data="confirm")]]
-            await update.message.reply_text(f"📅 {dt.strftime('%d.%m.%Y в %H:%M')} МСК\nПодтверждаешь?", reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
-            await update.message.reply_text("❌ Введи время: 20:33")
-        return
+    
+    # Обычный текст
+    await update.message.reply_text("✅ Текст сохранён!")
 
-async def button_callback(update, context):
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global app_instance
     query = update.callback_query
     await query.answer()
+    
     data = query.data
-    if data.startswith('h_'):
-        context.user_data['quiz_hashtag'] = data[2:]
+    
+    if data.startswith("hashtag_"):
+        hashtag = data.replace("hashtag_", "")
+        
+        if hashtag == "custom":
+            await query.edit_message_text("✏️ Напиши свой хэштег (например, #МойХэштег)")
+            context.user_data['step'] = 'waiting_for_custom_hashtag'
+            return
+        
+        quiz_data = context.user_data.get('quiz_data')
+        if not quiz_data:
+            await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
+            context.user_data.clear()
+            return
+        
+        context.user_data['quiz_hashtag'] = hashtag
         context.user_data['step'] = 'waiting_for_image'
-        await query.edit_message_text("🖼️ Отправь картинку")
-    elif data == 'confirm':
-        quiz = context.user_data.get('quiz_data')
+        
+        await query.edit_message_text(
+            f"✅ Хэштег: {hashtag}\n\n"
+            "🖼️ Отправь картинку для поста."
+        )
+    
+    elif data == "confirm_publish":
+        quiz_data = context.user_data.get('quiz_data')
         hashtag = context.user_data.get('quiz_hashtag')
         file_id = context.user_data.get('file_id')
-        publish_time = context.user_data.get('publish_time')
-        if quiz and hashtag and file_id and publish_time:
-            add_scheduled(quiz['question'], ', '.join(quiz['options']), quiz['correct_option_id'], hashtag, file_id, publish_time)
-            await query.edit_message_text(f"✅ Запланировано на {publish_time.strftime('%d.%m %H:%M')}")
-        else:
-            await query.edit_message_text("❌ Ошибка")
+        
+        if not quiz_data or not hashtag or not file_id:
+            await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
+            context.user_data.clear()
+            return
+        
+        # ЗАПУСКАЕМ ТАЙМЕР
+        thread = threading.Thread(
+            target=publish_quiz_delayed,
+            args=[CHANNEL_ID, file_id, quiz_data, hashtag]
+        )
+        thread.daemon = True
+        thread.start()
+        
+        await query.edit_message_text(
+            f"✅ Викторина запланирована!\n\n"
+            f"⏳ Опубликую через {DELAY_SECONDS} секунд...\n\n"
+            "Никуда не уходи, я вернусь! 🚀"
+        )
+        
+        context.user_data.clear()
+    
+    elif data == "cancel_publish":
+        await query.edit_message_text("❌ Отменено.")
+        context.user_data.clear()
 
-async def handle_image(update, context):
-    if context.user_data.get('step') == 'waiting_for_image' and update.message.photo:
-        context.user_data['file_id'] = update.message.photo[-1].file_id
-        context.user_data['step'] = 'waiting_for_time'
-        await update.message.reply_text("📅 Введи время: 20:33")
+async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('step') != 'waiting_for_custom_hashtag':
+        return
+    
+    text = update.message.text.strip()
+    if not text.startswith('#'):
+        text = '#' + text
+    
+    context.user_data['quiz_hashtag'] = text
+    context.user_data['step'] = 'waiting_for_image'
+    
+    await update.message.reply_text(
+        f"✅ Хэштег: {text}\n\n"
+        "🖼️ Отправь картинку для поста."
+    )
 
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('step') != 'waiting_for_image':
+        return
+    
+    if not update.message.photo:
+        await update.message.reply_text("❌ Отправь именно картинку")
+        return
+    
+    photo = update.message.photo[-1]
+    context.user_data['file_id'] = photo.file_id
+    
+    quiz_data = context.user_data.get('quiz_data')
+    hashtag = context.user_data.get('quiz_hashtag')
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Опубликовать через 60 секунд", callback_data="confirm_publish")],
+        [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
+    ]
+    
+    await update.message.reply_text(
+        f"🖼️ Картинка сохранена!\n\n"
+        f"❓ {quiz_data['question']}\n"
+        f"🏷️ {hashtag}\n\n"
+        "Нажми кнопку, чтобы запустить таймер на 60 секунд.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# --- ЗАПУСК ---
 def main():
     global app_instance
-    init_db()
     app = Application.builder().token(BOT_TOKEN).build()
     app_instance = app
-    threading.Thread(target=check_scheduled, daemon=True).start()
+    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("quiz", start_quiz))
+    
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
-    print("🤖 Бот запущен")
+    
+    print("🤖 Бот запущен!")
+    print(f"⏳ Задержка публикации: {DELAY_SECONDS} секунд")
+    print(f"📅 Текущее время: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     app.run_polling()
 
 if __name__ == "__main__":
