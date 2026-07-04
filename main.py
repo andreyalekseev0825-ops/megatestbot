@@ -2,6 +2,7 @@ import sqlite3
 import threading
 import time
 import re
+import requests
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -60,35 +61,57 @@ def parse_quiz(text):
         "correct_option_id": correct_option_id
     }
 
-# --- ФУНКЦИЯ ПУБЛИКАЦИИ ---
+# --- ФУНКЦИЯ ПУБЛИКАЦИИ (через requests, без asyncio) ---
 def publish_quiz_delayed(chat_id, file_id, quiz_data, hashtag):
     try:
         print(f"⏳ Таймер запущен на {DELAY_SECONDS} секунд")
         time.sleep(DELAY_SECONDS)
         
-        bot = app_instance.bot
+        print("📤 Начинаю публикацию...")
+        
+        # 1. Отправляем фото
+        url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
         caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
         
-        bot.send_photo(
-            chat_id=chat_id,
-            photo=file_id,
-            caption=caption,
-            parse_mode="HTML"
+        response = requests.post(
+            url_photo,
+            data={
+                "chat_id": chat_id,
+                "photo": file_id,
+                "caption": caption,
+                "parse_mode": "HTML"
+            }
         )
+        print(f"📸 Фото: {response.json().get('ok', False)}")
         
-        bot.send_poll(
-            chat_id=chat_id,
-            question=quiz_data['question'],
-            options=quiz_data['options'],
-            type="quiz",
-            correct_option_id=quiz_data['correct_option_id'],
-            is_anonymous=True
+        # 2. Отправляем опрос
+        url_poll = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPoll"
+        
+        # Формируем варианты в нужном формате
+        options_json = [{"text": opt} for opt in quiz_data['options']]
+        
+        response = requests.post(
+            url_poll,
+            json={
+                "chat_id": chat_id,
+                "question": quiz_data['question'],
+                "options": quiz_data['options'],
+                "type": "quiz",
+                "correct_option_id": quiz_data['correct_option_id'],
+                "is_anonymous": True
+            }
         )
+        print(f"📊 Опрос: {response.json().get('ok', False)}")
         
-        print(f"✅ ВИКТОРИНА ОПУБЛИКОВАНА: {quiz_data['question'][:30]}...")
+        if response.json().get('ok'):
+            print(f"✅ ВИКТОРИНА ОПУБЛИКОВАНА: {quiz_data['question'][:30]}...")
+        else:
+            print(f"❌ Ошибка API: {response.json()}")
         
     except Exception as e:
         print(f"❌ ОШИБКА ПУБЛИКАЦИИ: {e}")
+        import traceback
+        traceback.print_exc()
 
 # --- ОБРАБОТЧИКИ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
