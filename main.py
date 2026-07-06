@@ -556,14 +556,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text("❌ Неизвестная команда.")
             
-
-
-        
-    
-        
-        
       
-    async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('step') != 'waiting_for_custom_hashtag':
         return
     
