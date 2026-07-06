@@ -269,19 +269,27 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 async def cancel_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет конкретную викторину по ID"""
+    """Отменяет конкретную викторину по ID: /cancel 123"""
     chat_id = str(update.effective_user.id)
+    
+    # Проверяем, есть ли аргумент
     if not context.args:
-        await update.message.reply_text("❌ Укажи ID викторины: /cancel_123")
+        await update.message.reply_text(
+            "❌ Укажи ID викторины:\n"
+            "`/cancel 123` — отменить викторину с ID 123\n"
+            "`/my` — посмотреть ID всех викторин"
+        )
         return
     
     try:
         quiz_id = int(context.args[0])
         delete_user_scheduled(chat_id, quiz_id)
         await update.message.reply_text(f"✅ Викторина #{quiz_id} отменена.")
-    except:
-        await update.message.reply_text("❌ Ошибка. Проверь ID.")
-
+    except ValueError:
+        await update.message.reply_text("❌ ID должен быть числом. Пример: `/cancel 123`")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+        
 async def cancel_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отменяет все викторины пользователя"""
     chat_id = str(update.effective_user.id)
