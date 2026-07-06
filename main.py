@@ -512,7 +512,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📤 Публикую викторину сейчас...")
         
         try:
-            caption = f"🎯 ВИКТОРИНА\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+            caption = f"Викторина\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
             
             url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
             requests.post(url_photo, data={
