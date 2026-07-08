@@ -17,7 +17,7 @@ SUGGESTION_LINK = "https://t.me/trassa993?direct"
 QUIZZES_DB = 'quizzes.db'
 BASE_QUIZZES_DB = 'basequizzes.db'
 # --- ID ПОЛЬЗОВАТЕЛЯ ДЛЯ НАПОМИНАНИЙ ---
-MEME_ADMIN_ID = "5206039766"  # ЗАМЕНИ НА РЕАЛЬНЫЙ CHAT_ID
+MEME_ADMIN_ID = "6607609864"  # ЗАМЕНИ НА РЕАЛЬНЫЙ CHAT_ID
 
 HASHTAGS = [
     "#Новое_поколение", "#Игра_бога", "#Идеальный_мир", "#Голос_времени",
@@ -244,9 +244,9 @@ def reminder_loop():
             
             # Время для напоминаний: 17:30, 18:30, 19:30 (МСК)
             reminder_times = [
-                {"hour": 18, "minute": 20, "start_remind": 18, "start_minute": 10},
-                {"hour": 18, "minute": 30, "start_remind": 18, "start_minute": 5},
-                {"hour": 19, "minute": 30, "start_remind": 19, "start_minute": 5}
+                {"hour": 14, "minute": 30, "start_remind": 14, "start_minute": 5},
+                {"hour": 15, "minute": 30, "start_remind": 15, "start_minute": 5},
+                {"hour": 16, "minute": 30, "start_remind": 16, "start_minute": 5}
             ]
             
             for rt in reminder_times:
