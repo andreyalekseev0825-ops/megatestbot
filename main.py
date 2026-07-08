@@ -358,8 +358,9 @@ def scheduler_loop():
 def parse_datetime(text):
     now = datetime.now()
     
+    # --- ТОЛЬКО ВРЕМЯ (20:33) ---
     match = re.search(r'(\d{1,2}):(\d{2})', text)
-    if match:
+    if match and not re.search(r'\d{1,2}\.\d{1,2}', text):
         hour, minute = int(match.group(1)), int(match.group(2))
         dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if dt < now:
@@ -367,13 +368,22 @@ def parse_datetime(text):
         dt = dt - timedelta(hours=3)
         return dt
     
+    # --- ДАТА + ВРЕМЯ (08.07 20:33) ---
     match = re.search(r'(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})', text)
     if match:
         day, month, hour, minute = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
         dt = datetime(now.year, month, day, hour, minute)
+        # Если дата уже прошла в этом году — добавляем год
+        if dt < now:
+            # Проверяем, не сегодня ли это (тогда добавляем день)
+            if dt.date() == now.date():
+                dt = dt + timedelta(days=1)
+            else:
+                dt = dt.replace(year=now.year + 1)
         dt = dt - timedelta(hours=3)
         return dt
     
+    # --- ДАТА + ВРЕМЯ С ГОДОМ (08.07.2026 20:33) ---
     match = re.search(r'(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})', text)
     if match:
         day, month, year, hour, minute = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
