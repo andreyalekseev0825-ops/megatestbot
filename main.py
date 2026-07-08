@@ -936,6 +936,23 @@ async def handle_meme_media_handler(update: Update, context: ContextTypes.DEFAUL
         return
     await handle_meme_media(update, context)
 
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает фото и видео для викторин и мемов"""
+    step = context.user_data.get('step')
+    
+    # Если ждём картинку для викторины
+    if step == 'waiting_for_image':
+        await handle_image(update, context)
+        return
+    
+    # Если ждём медиа для мема
+    if step == 'waiting_for_meme_media':
+        await handle_meme_media(update, context)
+        return
+    
+    # Если ничего не ждём — игнорируем
+    await update.message.reply_text("❌ Я не жду медиа. Используй /quiz или /meme чтобы начать.")
+
 # --- ЗАПУСК ---
 def main():
     init_db()
@@ -969,8 +986,7 @@ def main():
     app.add_handler(CommandHandler("backupbase", backup_base_command))
     
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
-    app.add_handler(MessageHandler(filters.PHOTO & filters.Regex(r'^/meme'), handle_meme_media_handler))
-    app.add_handler(MessageHandler(filters.VIDEO, handle_meme_media_handler))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
