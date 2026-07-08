@@ -12,8 +12,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # --- КОНФИГИ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = "@trassa993"  # ЗАМЕНИ
-SUGGESTION_LINK = "https://t.me/trassa993?direct"  # ЗАМЕНИ
+CHANNEL_ID = "@trassa993"
+SUGGESTION_LINK = "https://t.me/trassa993?direct"
 QUIZZES_DB = 'quizzes.db'
 BASE_QUIZZES_DB = 'basequizzes.db'
 
@@ -27,7 +27,7 @@ HASHTAGS = [
 def init_db():
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
-    # Таблица для сохранённых викторин (история)
+    # История викторин
     c.execute('''
         CREATE TABLE IF NOT EXISTS quizzes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,7 +38,7 @@ def init_db():
             date TEXT
         )
     ''')
-    # Таблица для запланированных викторин (с username)
+    # Запланированные викторины
     c.execute('''
         CREATE TABLE IF NOT EXISTS scheduled (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,10 +52,23 @@ def init_db():
             publish_time TEXT
         )
     ''')
+    # Мемы
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS memes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id TEXT,
+            username TEXT,
+            file_id TEXT,
+            file_type TEXT,
+            hashtag TEXT,
+            publish_time TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
     print("✅ База данных готова")
 
+# --- ФУНКЦИИ ДЛЯ ВИКТОРИН ---
 def save_scheduled(chat_id, username, question, options, correct_option_id, hashtag, file_id, publish_time):
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
@@ -67,7 +80,6 @@ def save_scheduled(chat_id, username, question, options, correct_option_id, hash
     conn.close()
 
 def get_due_quizzes():
-    """Возвращает все викторины, у которых наступило время публикации"""
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     now = datetime.now().isoformat()
@@ -87,7 +99,6 @@ def delete_scheduled(quiz_id):
     conn.close()
 
 def get_user_scheduled(chat_id):
-    """Возвращает все запланированные викторины пользователя"""
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     c.execute('''
@@ -98,7 +109,6 @@ def get_user_scheduled(chat_id):
     return rows
 
 def get_user_scheduled_by_chat_id(chat_id):
-    """Возвращает все запланированные викторины пользователя по chat_id (с username)"""
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     c.execute('''
@@ -109,7 +119,6 @@ def get_user_scheduled_by_chat_id(chat_id):
     return rows
 
 def get_user_scheduled_by_username(username):
-    """Возвращает все запланированные викторины пользователя по username"""
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     c.execute('''
@@ -120,7 +129,6 @@ def get_user_scheduled_by_username(username):
     return rows
 
 def delete_user_scheduled(chat_id, quiz_id=None):
-    """Удаляет викторину пользователя по ID или все"""
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     if quiz_id:
@@ -130,11 +138,61 @@ def delete_user_scheduled(chat_id, quiz_id=None):
     conn.commit()
     conn.close()
 
-# --- ФОНОВЫЙ ПОТОК ДЛЯ ПРОВЕРКИ РАСПИСАНИЯ ---
+# --- ФУНКЦИИ ДЛЯ МЕМОВ ---
+def save_meme(chat_id, username, file_id, file_type, hashtag, publish_time):
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO memes (chat_id, username, file_id, file_type, hashtag, publish_time)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (chat_id, username, file_id, file_type, hashtag, publish_time.isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_due_memes():
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    now = datetime.now().isoformat()
+    c.execute('''
+        SELECT id, chat_id, file_id, file_type, hashtag, publish_time
+        FROM memes WHERE publish_time <= ?
+    ''', (now,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_meme(meme_id):
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('DELETE FROM memes WHERE id = ?', (meme_id,))
+    conn.commit()
+    conn.close()
+
+def get_user_memes(chat_id):
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, file_type, hashtag, publish_time FROM memes WHERE chat_id = ? ORDER BY publish_time
+    ''', (chat_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def delete_user_memes(chat_id, meme_id=None):
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    if meme_id:
+        c.execute('DELETE FROM memes WHERE chat_id = ? AND id = ?', (chat_id, meme_id))
+    else:
+        c.execute('DELETE FROM memes WHERE chat_id = ?', (chat_id,))
+    conn.commit()
+    conn.close()
+
+# --- ФОНОВЫЙ ПОТОК ---
 def scheduler_loop():
-    """Проверяет БД каждые 10 секунд и публикует викторины"""
     while True:
         try:
+            # --- ПРОВЕРКА ВИКТОРИН ---
             due = get_due_quizzes()
             for row in due:
                 quiz_id, chat_id, question, options, correct_option_id, hashtag, file_id, publish_time = row
@@ -143,7 +201,6 @@ def scheduler_loop():
                 try:
                     caption = f"Викторина\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
                     
-                    # Отправляем фото
                     url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
                     requests.post(url_photo, data={
                         "chat_id": CHANNEL_ID,
@@ -152,7 +209,6 @@ def scheduler_loop():
                         "parse_mode": "HTML"
                     })
                     
-                    # Отправляем опрос
                     url_poll = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPoll"
                     resp = requests.post(url_poll, json={
                         "chat_id": CHANNEL_ID,
@@ -172,17 +228,46 @@ def scheduler_loop():
                     
                 except Exception as e:
                     print(f"❌ Ошибка публикации: {e}")
+            
+            # --- ПРОВЕРКА МЕМОВ ---
+            due_memes = get_due_memes()
+            for row in due_memes:
+                meme_id, chat_id, file_id, file_type, hashtag, publish_time = row
+                try:
+                    caption = f"Мем\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+                    
+                    if file_type == 'photo':
+                        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+                        requests.post(url, data={
+                            "chat_id": CHANNEL_ID,
+                            "photo": file_id,
+                            "caption": caption,
+                            "parse_mode": "HTML"
+                        })
+                    else:
+                        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
+                        requests.post(url, data={
+                            "chat_id": CHANNEL_ID,
+                            "video": file_id,
+                            "caption": caption,
+                            "parse_mode": "HTML"
+                        })
+                    
+                    print(f"✅ Мем опубликован: {hashtag}")
+                    delete_meme(meme_id)
+                    
+                except Exception as e:
+                    print(f"❌ Ошибка публикации мема: {e}")
                     
         except Exception as e:
             print(f"❌ Ошибка в планировщике: {e}")
         
         time.sleep(10)
 
-# --- ПАРСИНГ ВРЕМЕНИ ---
+# --- ПАРСИНГИ ---
 def parse_datetime(text):
     now = datetime.now()
     
-    # Только время (20:33)
     match = re.search(r'(\d{1,2}):(\d{2})', text)
     if match:
         hour, minute = int(match.group(1)), int(match.group(2))
@@ -192,7 +277,6 @@ def parse_datetime(text):
         dt = dt - timedelta(hours=3)
         return dt
     
-    # Дата + время (15.07 20:33)
     match = re.search(r'(\d{1,2})\.(\d{1,2})\s+(\d{1,2}):(\d{2})', text)
     if match:
         day, month, hour, minute = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
@@ -200,7 +284,6 @@ def parse_datetime(text):
         dt = dt - timedelta(hours=3)
         return dt
     
-    # Дата + время с годом (15.07.2026 20:33)
     match = re.search(r'(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})', text)
     if match:
         day, month, year, hour, minute = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
@@ -210,7 +293,6 @@ def parse_datetime(text):
     
     return None
 
-# --- ПАРСИНГ ВИКТОРИНЫ ---
 def parse_quiz(text):
     match = re.match(r'^(.+?)\s*\((.+)\)\s*$', text.strip())
     if not match:
@@ -231,7 +313,6 @@ def parse_quiz(text):
         correct_option_id = 0
     return {"question": question, "options": cleaned, "correct_option_id": correct_option_id}
 
-# --- БАЗА БАЗОВЫХ ВОПРОСОВ ---
 def init_base_db():
     conn = sqlite3.connect(BASE_QUIZZES_DB)
     c = conn.cursor()
@@ -257,7 +338,6 @@ def save_base_quiz(question, options, correct_option_id):
     ''', (question, options, correct_option_id, datetime.now().isoformat()))
     conn.commit()
     conn.close()
-    print(f"✅ Базовый вопрос сохранён: {question[:30]}...")
 
 def backup_base_quizzes():
     if os.path.exists(BASE_QUIZZES_DB):
@@ -266,333 +346,443 @@ def backup_base_quizzes():
         return backup_name
     return None
 
-# --- ОБРАБОТЧИКИ ---
+def backup_quizzes():
+    if os.path.exists(QUIZZES_DB):
+        backup_name = f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        shutil.copy2(QUIZZES_DB, backup_name)
+        return backup_name
+    return None
+
+# --- ОБРАБОТЧИКИ ВИКТОРИН ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Бот для викторин\n\n"
+        "👋 Бот для викторин и мемов\n\n"
         "📝 /quiz — создать викторину\n"
+        "🖼️ /meme — создать мем\n"
         "📋 /my — мои запланированные викторины\n"
-        "🗑️ /cancel_all — отменить все мои викторины\n"
+        "📋 /mymemes — мои запланированные мемы\n"
+        "🗑️ /cancel_all — отменить все викторины\n"
+        "🗑️ /cancelallmemes — отменить все мемы\n"
         "🔍 /view @username — посмотреть викторины другого пользователя\n"
         "🆔 /id — показать свой ID"
     )
 
 async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает все запланированные викторины пользователя"""
     chat_id = str(update.effective_user.id)
     scheduled = get_user_scheduled(chat_id)
-    
     if not scheduled:
         await update.message.reply_text("📭 У тебя нет запланированных викторин.")
         return
-    
     reply = "📋 **Твои запланированные викторины:**\n\n"
     for idx, (quiz_id, question, publish_time) in enumerate(scheduled, 1):
         dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
         reply += f"{idx}. {question[:40]}... → {dt.strftime('%d.%m %H:%M')}\n"
         reply += f"   🆔 {quiz_id} | /cancel_{quiz_id}\n\n"
-    
     await update.message.reply_text(reply)
 
 async def cancel_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет конкретную викторину по ID: /cancel 123"""
     chat_id = str(update.effective_user.id)
-    
     if not context.args:
-        await update.message.reply_text(
-            "❌ Укажи ID викторины:\n"
-            "`/cancel 123` — отменить викторину с ID 123\n"
-            "`/my` — посмотреть ID всех викторин"
-        )
+        await update.message.reply_text("❌ Укажи ID: `/cancel 123`")
         return
-    
     try:
         quiz_id = int(context.args[0])
         delete_user_scheduled(chat_id, quiz_id)
         await update.message.reply_text(f"✅ Викторина #{quiz_id} отменена.")
-    except ValueError:
-        await update.message.reply_text("❌ ID должен быть числом. Пример: `/cancel 123`")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+    except:
+        await update.message.reply_text("❌ Ошибка. ID должен быть числом.")
 
 async def cancel_quiz_by_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет викторину по порядковому номеру: /cancel_1"""
     chat_id = str(update.effective_user.id)
-    
-    command = update.message.text
     try:
-        number = int(command.split('_')[1])
-    except (IndexError, ValueError):
-        await update.message.reply_text(
-            "❌ Использование: `/cancel_1`, `/cancel_2` и т.д.\n"
-            "📋 /my — посмотреть все викторины с номерами"
-        )
+        number = int(update.message.text.split('_')[1])
+    except:
+        await update.message.reply_text("❌ Использование: `/cancel_1`, `/cancel_2`...")
         return
-    
     scheduled = get_user_scheduled(chat_id)
-    
     if not scheduled:
-        await update.message.reply_text("📭 У тебя нет запланированных викторин.")
+        await update.message.reply_text("📭 Нет викторин.")
         return
-    
     if number < 1 or number > len(scheduled):
-        await update.message.reply_text(
-            f"❌ Викторины #{number} не существует.\n"
-            f"📋 У тебя {len(scheduled)} викторин. /my — посмотреть"
-        )
+        await update.message.reply_text(f"❌ Викторины #{number} нет. Всего {len(scheduled)}.")
         return
-    
     quiz_id = scheduled[number - 1][0]
     delete_user_scheduled(chat_id, quiz_id)
     await update.message.reply_text(f"✅ Викторина #{number} отменена.")
 
 async def cancel_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отменяет все викторины пользователя"""
     chat_id = str(update.effective_user.id)
     delete_user_scheduled(chat_id)
-    await update.message.reply_text("✅ Все твои викторины отменены.")
+    await update.message.reply_text("✅ Все викторины отменены.")
 
 async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['step'] = 'waiting_for_quiz_text'
     await update.message.reply_text(
         "📝 Отправь в формате:\n"
         "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
-        "Где * — правильный ответ\n\n"
-        "Пример:\n"
-        "`Как зовут персонажа (Глен; Ашра; Кацпер; Воланд*)`"
+        "Где * — правильный ответ"
     )
 
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /id — показать свой chat_id"""
     user_id = update.effective_user.id
     username = update.effective_user.username or "без юзернейма"
-    await update.message.reply_text(
-        f"🆔 **Твой ID:** `{user_id}`\n"
-        f"👤 **Юзернейм:** @{username}\n\n"
-        "Передай этот ID или @username другому пользователю, чтобы он мог посмотреть твои викторины через `/view`."
-    )
+    await update.message.reply_text(f"🆔 **Твой ID:** `{user_id}`\n👤 **Юзернейм:** @{username}")
 
 async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /view @username или /view 123456789 — просмотр викторин пользователя"""
-    
     if not context.args:
-        await update.message.reply_text(
-            "❌ Укажи пользователя:\n"
-            "`/view @username` — по юзернейму\n"
-            "`/view 123456789` — по ID"
-        )
+        await update.message.reply_text("❌ Укажи: `/view @username` или `/view 123456789`")
         return
-    
     target = context.args[0]
-    
-    # --- ПОИСК ПО ЮЗЕРНЕЙМУ ---
     if target.startswith('@'):
-        username = target[1:]  # убираем @
+        username = target[1:]
         scheduled = get_user_scheduled_by_username(username)
-        
         if not scheduled:
-            await update.message.reply_text(f"📭 У пользователя @{username} нет запланированных викторин.")
+            await update.message.reply_text(f"📭 У @{username} нет викторин.")
             return
-        
-        chat_id = scheduled[0][1]  # берём chat_id из первой записи
-        
-        reply = f"📋 **Викторины пользователя @{username}** (`{chat_id}`):\n\n"
-        for idx, (quiz_id, _, _, question, publish_time) in enumerate(scheduled, 1):
-            dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
-            reply += f"{idx}. {question[:50]}... → {dt.strftime('%d.%m %H:%M')}\n"
-            reply += f"   🆔 {quiz_id} | /cancel_{quiz_id}\n\n"
-        
-        await update.message.reply_text(reply)
-        return
-    
-    # --- ПОИСК ПО ID ---
-    if target.isdigit():
-        scheduled = get_user_scheduled_by_chat_id(target)
-        
-        if not scheduled:
-            await update.message.reply_text(f"📭 У пользователя `{target}` нет запланированных викторин.")
-            return
-        
-        username = scheduled[0][1] if scheduled else "без_юзернейма"
-        
-        reply = f"📋 **Викторины пользователя @{username}** (`{target}`):\n\n"
+        chat_id = scheduled[0][1]
+        reply = f"📋 **Викторины @{username}** (`{chat_id}`):\n\n"
         for idx, (quiz_id, _, question, publish_time) in enumerate(scheduled, 1):
             dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
             reply += f"{idx}. {question[:50]}... → {dt.strftime('%d.%m %H:%M')}\n"
-            reply += f"   🆔 {quiz_id} | /cancel_{quiz_id}\n\n"
-        
+            reply += f"   🆔 {quiz_id}\n\n"
         await update.message.reply_text(reply)
         return
-    
+    if target.isdigit():
+        scheduled = get_user_scheduled_by_chat_id(target)
+        if not scheduled:
+            await update.message.reply_text(f"📭 У `{target}` нет викторин.")
+            return
+        username = scheduled[0][1] if scheduled else "без_юзернейма"
+        reply = f"📋 **Викторины @{username}** (`{target}`):\n\n"
+        for idx, (quiz_id, _, question, publish_time) in enumerate(scheduled, 1):
+            dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
+            reply += f"{idx}. {question[:50]}... → {dt.strftime('%d.%m %H:%M')}\n"
+            reply += f"   🆔 {quiz_id}\n\n"
+        await update.message.reply_text(reply)
+        return
+    await update.message.reply_text("❌ Неправильный формат.")
+
+# --- ОБРАБОТЧИКИ МЕМОВ ---
+async def start_meme(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['step'] = 'waiting_for_meme_media'
     await update.message.reply_text(
-        "❌ Неправильный формат.\n"
-        "Используй: `/view @username` или `/view 123456789`"
+        "🖼️ Отправь картинку или видео для мема.\n\n"
+        "После загрузки выбери действие."
     )
 
+async def handle_meme_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('step') != 'waiting_for_meme_media':
+        return
+    file_id = None
+    file_type = None
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+        file_type = 'photo'
+    elif update.message.video:
+        file_id = update.message.video.file_id
+        file_type = 'video'
+    else:
+        await update.message.reply_text("❌ Отправь картинку или видео.")
+        return
+    context.user_data['meme_file_id'] = file_id
+    context.user_data['meme_file_type'] = file_type
+    context.user_data['step'] = 'waiting_for_meme_hashtag'
+    keyboard = [
+        [InlineKeyboardButton("✅ Добавить #ФлудНаПМ", callback_data="meme_hashtag_add")],
+        [InlineKeyboardButton("⏭️ Пропустить", callback_data="meme_hashtag_skip")]
+    ]
+    await update.message.reply_text(
+        "📝 Добавить хэштег #ФлудНаПМ к мему?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def meme_hashtag_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "meme_hashtag_add":
+        context.user_data['meme_hashtag'] = "#ФлудНаПМ"
+        await query.edit_message_text("✅ Хэштег добавлен!")
+    else:
+        context.user_data['meme_hashtag'] = "#мемло"
+        await query.edit_message_text("⏭️ Хэштег пропущен, будет только #мемло")
+    context.user_data['step'] = 'waiting_for_meme_action'
+    keyboard = [
+        [InlineKeyboardButton("✅ Опубликовать сейчас", callback_data="meme_publish_now")],
+        [InlineKeyboardButton("⏰ Запланировать на время", callback_data="meme_schedule")],
+        [InlineKeyboardButton("❌ Отмена", callback_data="meme_cancel")]
+    ]
+    await query.message.reply_text(
+        "Что делаем с мемом?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def meme_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "meme_publish_now":
+        file_id = context.user_data.get('meme_file_id')
+        file_type = context.user_data.get('meme_file_type')
+        hashtag = context.user_data.get('meme_hashtag', '#мемло')
+        if not file_id:
+            await query.edit_message_text("❌ Ошибка. Начни заново через /meme")
+            context.user_data.clear()
+            return
+        await query.edit_message_text("📤 Публикую мем сейчас...")
+        try:
+            caption = f"Мем\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+            if file_type == 'photo':
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+                requests.post(url, data={"chat_id": CHANNEL_ID, "photo": file_id, "caption": caption, "parse_mode": "HTML"})
+            else:
+                url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
+                requests.post(url, data={"chat_id": CHANNEL_ID, "video": file_id, "caption": caption, "parse_mode": "HTML"})
+            await query.edit_message_text(f"✅ Мем ОПУБЛИКОВАН!\n🏷️ {hashtag}")
+        except Exception as e:
+            await query.edit_message_text(f"❌ Ошибка: {e}")
+        context.user_data.clear()
+        return
+    if data == "meme_schedule":
+        context.user_data['step'] = 'waiting_for_meme_time'
+        await query.edit_message_text("📅 **Укажи время публикации** (МСК):\nНапример: `20:33`")
+        return
+    if data == "meme_cancel":
+        await query.edit_message_text("❌ Отменено.")
+        context.user_data.clear()
+        return
+
+async def handle_meme_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('step') != 'waiting_for_meme_time':
+        return
+    dt = parse_datetime(update.message.text)
+    if dt is None:
+        await update.message.reply_text("❌ Не понял формат. Пример: `20:33`")
+        return
+    now = datetime.now()
+    if dt < now:
+        await update.message.reply_text("❌ Время уже прошло!")
+        return
+    chat_id = str(update.effective_user.id)
+    username = update.effective_user.username or "без_юзернейма"
+    file_id = context.user_data.get('meme_file_id')
+    file_type = context.user_data.get('meme_file_type')
+    hashtag = context.user_data.get('meme_hashtag', '#мемло')
+    save_meme(chat_id, username, file_id, file_type, hashtag, dt)
+    msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
+    delay = int((dt - now).total_seconds())
+    await update.message.reply_text(f"✅ Мем запланирован на **{msk_time}** МСК!\n⏳ Осталось: {delay} сек\n🏷️ {hashtag}")
+    context.user_data.clear()
+
+async def my_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_user.id)
+    memes = get_user_memes(chat_id)
+    if not memes:
+        await update.message.reply_text("📭 У тебя нет запланированных мемов.")
+        return
+    reply = "📋 **Твои запланированные мемы:**\n\n"
+    for idx, (meme_id, file_type, hashtag, publish_time) in enumerate(memes, 1):
+        dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
+        reply += f"{idx}. {file_type} | {hashtag} → {dt.strftime('%d.%m %H:%M')}\n"
+        reply += f"   🆔 {meme_id} | /cancelmeme_{meme_id}\n\n"
+    await update.message.reply_text(reply)
+
+async def cancel_meme(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_user.id)
+    if not context.args:
+        await update.message.reply_text("❌ Укажи ID: `/cancelmeme 123`")
+        return
+    try:
+        meme_id = int(context.args[0])
+        delete_user_memes(chat_id, meme_id)
+        await update.message.reply_text(f"✅ Мем #{meme_id} отменён.")
+    except:
+        await update.message.reply_text("❌ Ошибка.")
+
+async def cancel_meme_by_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_user.id)
+    try:
+        number = int(update.message.text.split('_')[1])
+    except:
+        await update.message.reply_text("❌ Использование: `/cancelmeme_1`, `/cancelmeme_2`...")
+        return
+    memes = get_user_memes(chat_id)
+    if not memes:
+        await update.message.reply_text("📭 Нет мемов.")
+        return
+    if number < 1 or number > len(memes):
+        await update.message.reply_text(f"❌ Мема #{number} нет. Всего {len(memes)}.")
+        return
+    meme_id = memes[number - 1][0]
+    delete_user_memes(chat_id, meme_id)
+    await update.message.reply_text(f"✅ Мем #{number} отменён.")
+
+async def cancel_all_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_user.id)
+    delete_user_memes(chat_id)
+    await update.message.reply_text("✅ Все мемы отменены.")
+
+# --- БЭКАПЫ ---
+async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💾 Создаю бэкап...")
+    try:
+        backup_file = backup_quizzes()
+        if not backup_file:
+            await update.message.reply_text("❌ База не найдена.")
+            return
+        with open(backup_file, 'rb') as f:
+            await update.message.reply_document(document=f, filename=os.path.basename(backup_file), caption="✅ Бэкап создан!")
+        os.remove(backup_file)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+async def base_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['step'] = 'waiting_for_base_quiz_text'
+    await update.message.reply_text(
+        "📝 Отправь вопрос в формате:\n"
+        "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`"
+    )
+
+async def backup_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💾 Создаю бэкап базы вопросов...")
+    try:
+        backup_file = backup_base_quizzes()
+        if not backup_file:
+            await update.message.reply_text("❌ База не найдена.")
+            return
+        with open(backup_file, 'rb') as f:
+            await update.message.reply_document(document=f, filename=os.path.basename(backup_file), caption="✅ Бэкап создан!")
+        os.remove(backup_file)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+
+# --- ОСНОВНОЙ ОБРАБОТЧИК ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if not text:
         await update.message.reply_text("❌ Отправь текст")
         return
-    
     step = context.user_data.get('step')
     
-    # --- ШАГ 1: БАЗОВЫЙ ВОПРОС (/basequiz) ---
+    # Базовый вопрос
     if step == 'waiting_for_base_quiz_text':
         parsed = parse_quiz(text)
         if parsed and len(parsed['options']) >= 2:
             save_base_quiz(parsed['question'], '|||'.join(parsed['options']), parsed['correct_option_id'])
-            await update.message.reply_text(
-                f"✅ Вопрос сохранён в базовую базу!\n\n"
-                f"❓ {parsed['question']}\n"
-                f"📊 Вариантов: {len(parsed['options'])}\n"
-                f"✅ Правильный ответ: {parsed['options'][parsed['correct_option_id']]}"
-            )
+            await update.message.reply_text(f"✅ Вопрос сохранён!\n❓ {parsed['question']}")
         else:
-            await update.message.reply_text(
-                "❌ Неправильный формат.\n\n"
-                "Нужно: `Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
-                "Где * — правильный ответ"
-            )
+            await update.message.reply_text("❌ Неправильный формат.")
         context.user_data['step'] = None
         return
     
-    # --- ШАГ 2: ТЕКСТ ВИКТОРИНЫ (/quiz) ---
+    # Время для мема
+    if step == 'waiting_for_meme_time':
+        await handle_meme_time(update, context)
+        return
+    
+    # Текст викторины
     if step == 'waiting_for_quiz_text':
         parsed = parse_quiz(text)
         if parsed and len(parsed['options']) >= 2:
             context.user_data['quiz_data'] = parsed
             context.user_data['step'] = 'waiting_for_hashtag'
-            
             keyboard = []
             for hashtag in HASHTAGS:
                 keyboard.append([InlineKeyboardButton(hashtag, callback_data=f"hashtag_{hashtag}")])
             keyboard.append([InlineKeyboardButton("✏️ Свой", callback_data="hashtag_custom")])
-            
             await update.message.reply_text(
-                f"❓ {parsed['question']}\n\n"
-                f"✅ Правильный ответ: {parsed['options'][parsed['correct_option_id']]}\n\n"
-                "🏷️ Выбери хэштег:",
+                f"❓ {parsed['question']}\n✅ Правильный ответ: {parsed['options'][parsed['correct_option_id']]}\n\n🏷️ Выбери хэштег:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
-            await update.message.reply_text(
-                "❌ Неправильный формат.\n\n"
-                "Нужно: `Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
-                "Где * — правильный ответ"
-            )
+            await update.message.reply_text("❌ Неправильный формат. Пример: `Вопрос (А; Б*; В; Г)`")
         return
     
-    # --- ШАГ 3: ВРЕМЯ ПУБЛИКАЦИИ ---
+    # Время для викторины
     if step == 'waiting_for_time':
         dt = parse_datetime(text)
         if dt is None:
-            await update.message.reply_text(
-                "❌ Не понял формат времени.\n\n"
-                "Примеры:\n"
-                "`20:33` — сегодня в 20:33\n"
-                "`15.07 20:33` — 15 июля в 20:33\n"
-                "`15.07.2026 20:33` — 15 июля 2026 в 20:33"
-            )
+            await update.message.reply_text("❌ Не понял формат. Пример: `20:33`")
             return
-        
-        if not isinstance(dt, datetime):
-            await update.message.reply_text("❌ Ошибка: время не распознано как дата. Попробуй ещё раз.")
-            return
-        
         now = datetime.now()
         if dt < now:
-            await update.message.reply_text(
-                "❌ Время уже прошло! Укажи будущее время.\n"
-                "Пример: `20:33` или `15.07 20:33`"
-            )
+            await update.message.reply_text("❌ Время уже прошло!")
             return
-        
         context.user_data['publish_time'] = dt
         context.user_data['step'] = 'waiting_for_confirmation'
-        
         delay = int((dt - now).total_seconds())
         msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
-        
         keyboard = [
             [InlineKeyboardButton("✅ Запланировать", callback_data="confirm_publish")],
             [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
         ]
-        
         await update.message.reply_text(
-            f"📅 **Публикация:** {msk_time} МСК\n"
-            f"⏳ **Осталось:** {delay} секунд\n\n"
-            "❓ " + context.user_data['quiz_data']['question'] + "\n"
-            "🏷️ " + context.user_data['quiz_hashtag'] + "\n\n"
-            "✅ Подтверждаешь?",
+            f"📅 **Публикация:** {msk_time} МСК\n⏳ Осталось: {delay} сек\n\n❓ {context.user_data['quiz_data']['question']}\n🏷️ {context.user_data['quiz_hashtag']}\n\n✅ Подтверждаешь?",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
     
-    # --- ШАГ 4: СВОЙ ХЭШТЕГ ---
+    # Свой хэштег
     if step == 'waiting_for_custom_hashtag':
         text = text.strip()
         if not text.startswith('#'):
             text = '#' + text
         context.user_data['quiz_hashtag'] = text
         context.user_data['step'] = 'waiting_for_image'
-        await update.message.reply_text(
-            f"✅ Хэштег: {text}\n\n"
-            "🖼️ Отправь картинку для поста.\n\n"
-            "После картинки выбери действие."
-        )
+        await update.message.reply_text(f"✅ Хэштег: {text}\n\n🖼️ Отправь картинку.")
         return
     
-    # --- ЛЮБОЙ ДРУГОЙ ТЕКСТ ---
     await update.message.reply_text(
         "❓ Я не понял.\n\n"
-        "Доступные команды:\n"
-        "/quiz — создать викторину\n"
-        "/basequiz — добавить вопрос в базу\n"
-        "/my — мои запланированные викторины\n"
-        "/cancel_all — отменить все мои викторины\n"
-        "/backup — бэкап основной базы\n"
-        "/backupbase — бэкап базы вопросов\n"
-        "/id — показать свой ID\n"
-        "/view @username — посмотреть викторины другого пользователя"
+        "Команды:\n"
+        "/quiz — викторина\n"
+        "/meme — мем\n"
+        "/my — мои викторины\n"
+        "/mymemes — мои мемы\n"
+        "/cancel_all — отменить все викторины\n"
+        "/cancelallmemes — отменить все мемы\n"
+        "/id — мой ID\n"
+        "/view @username — викторины пользователя"
     )
 
+# --- КНОПКИ ---
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
     data = query.data
     print(f"🔘 Нажата кнопка: {data}")
     
-    # --- ВЫБОР ХЭШТЕГА ---
+    # Хэштеги для мема
+    if data in ["meme_hashtag_add", "meme_hashtag_skip"]:
+        await meme_hashtag_callback(update, context)
+        return
+    
+    # Кнопки мема
+    if data in ["meme_publish_now", "meme_schedule", "meme_cancel"]:
+        await meme_button_callback(update, context)
+        return
+    
+    # Выбор хэштега
     if data.startswith("hashtag_"):
         hashtag = data.replace("hashtag_", "")
-        
         if hashtag == "custom":
             await query.edit_message_text("✏️ Напиши свой хэштег (например, #МойХэштег)")
             context.user_data['step'] = 'waiting_for_custom_hashtag'
             return
-        
         context.user_data['quiz_hashtag'] = hashtag
         context.user_data['step'] = 'waiting_for_image'
-        
         await query.edit_message_text(
-            f"✅ Хэштег: {hashtag}\n\n"
-            "🖼️ Отправь картинку для поста.\n\n"
-            "После картинки выбери действие."
+            f"✅ Хэштег: {hashtag}\n\n🖼️ Отправь картинку для поста.\n\nПосле картинки выбери действие."
         )
         return
     
-    # --- ЗАПЛАНИРОВАТЬ ---
+    # Запланировать
     if data == "schedule":
         context.user_data['step'] = 'waiting_for_time'
-        await query.edit_message_text(
-            "📅 **Укажи время публикации** (МСК):\n"
-            "Например: `20:33` или `15.07 20:33`"
-        )
+        await query.edit_message_text("📅 **Укажи время публикации** (МСК):\nНапример: `20:33`")
         return
     
-    # --- ПОДТВЕРЖДЕНИЕ ПУБЛИКАЦИИ (с таймером) ---
+    # Подтверждение публикации
     if data == "confirm_publish":
         chat_id = str(update.effective_user.id)
         username = update.effective_user.username or "без_юзернейма"
@@ -600,94 +790,48 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hashtag = context.user_data.get('quiz_hashtag')
         file_id = context.user_data.get('file_id')
         publish_time = context.user_data.get('publish_time')
-        
         if not quiz_data or not hashtag or not file_id or not publish_time:
             await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
             context.user_data.clear()
             return
-        
-        save_scheduled(
-            chat_id,
-            username,
-            quiz_data['question'],
-            '|||'.join(quiz_data['options']),
-            quiz_data['correct_option_id'],
-            hashtag,
-            file_id,
-            publish_time
-        )
-        
+        save_scheduled(chat_id, username, quiz_data['question'], '|||'.join(quiz_data['options']), quiz_data['correct_option_id'], hashtag, file_id, publish_time)
         msk_time = (publish_time + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
         delay = int((publish_time - datetime.now()).total_seconds())
-        
-        await query.edit_message_text(
-            f"✅ Викторина запланирована на **{msk_time}** МСК!\n\n"
-            f"⏳ Осталось: {delay} секунд\n\n"
-            "📋 /my — посмотреть все твои викторины"
-        )
-        
+        await query.edit_message_text(f"✅ Викторина запланирована на **{msk_time}** МСК!\n⏳ Осталось: {delay} сек\n📋 /my — посмотреть все")
         context.user_data.clear()
         return
     
-    # --- МОМЕНТАЛЬНАЯ ПУБЛИКАЦИЯ ---
+    # Моментальная публикация
     if data == "publish_now":
         quiz_data = context.user_data.get('quiz_data')
         hashtag = context.user_data.get('quiz_hashtag')
         file_id = context.user_data.get('file_id')
-        
         if not quiz_data or not hashtag or not file_id:
             await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
             context.user_data.clear()
             return
-        
         await query.edit_message_text("📤 Публикую викторину сейчас...")
-        
         try:
             caption = f"Викторина\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
-            
             url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-            requests.post(url_photo, data={
-                "chat_id": CHANNEL_ID,
-                "photo": file_id,
-                "caption": caption,
-                "parse_mode": "HTML"
-            })
-            
+            requests.post(url_photo, data={"chat_id": CHANNEL_ID, "photo": file_id, "caption": caption, "parse_mode": "HTML"})
             url_poll = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPoll"
-            resp = requests.post(url_poll, json={
-                "chat_id": CHANNEL_ID,
-                "question": quiz_data['question'],
-                "options": quiz_data['options'],
-                "type": "quiz",
-                "correct_option_id": quiz_data['correct_option_id'],
-                "is_anonymous": True
-            })
-            
+            resp = requests.post(url_poll, json={"chat_id": CHANNEL_ID, "question": quiz_data['question'], "options": quiz_data['options'], "type": "quiz", "correct_option_id": quiz_data['correct_option_id'], "is_anonymous": True})
             if resp.json().get('ok'):
                 conn = sqlite3.connect(QUIZZES_DB)
                 c = conn.cursor()
-                c.execute('''
-                    INSERT INTO quizzes (question, options, correct_option_id, hashtag, date)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (quiz_data['question'], '|||'.join(quiz_data['options']), quiz_data['correct_option_id'], hashtag, datetime.now().isoformat()))
+                c.execute('INSERT INTO quizzes (question, options, correct_option_id, hashtag, date) VALUES (?, ?, ?, ?, ?)', (quiz_data['question'], '|||'.join(quiz_data['options']), quiz_data['correct_option_id'], hashtag, datetime.now().isoformat()))
                 conn.commit()
                 conn.close()
-                
-                await query.edit_message_text(
-                    f"✅ Викторина ОПУБЛИКОВАНА в канале!\n\n"
-                    f"❓ {quiz_data['question']}\n"
-                    f"🏷️ {hashtag}"
-                )
+                await query.edit_message_text(f"✅ Викторина ОПУБЛИКОВАНА!\n❓ {quiz_data['question']}\n🏷️ {hashtag}")
             else:
                 await query.edit_message_text(f"❌ Ошибка: {resp.json()}")
-                
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
-        
         context.user_data.clear()
         return
     
-    # --- ОТМЕНА ---
+    # Отмена
     if data == "cancel_publish":
         await query.edit_message_text("❌ Отменено.")
         context.user_data.clear()
@@ -695,130 +839,53 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await query.edit_message_text("❌ Неизвестная команда.")
 
-async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get('step') != 'waiting_for_custom_hashtag':
-        return
-    
-    text = update.message.text.strip()
-    if not text.startswith('#'):
-        text = '#' + text
-    
-    context.user_data['quiz_hashtag'] = text
-    context.user_data['step'] = 'waiting_for_image'
-    
-    await update.message.reply_text(
-        f"✅ Хэштег: {text}\n\n"
-        "🖼️ Отправь картинку для поста.\n\n"
-        "После картинки выбери действие."
-    )
-
+# --- КАРТИНКА ДЛЯ ВИКТОРИНЫ ---
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('step') != 'waiting_for_image':
         return
-    
     if not update.message.photo:
         await update.message.reply_text("❌ Отправь именно картинку")
         return
-    
     photo = update.message.photo[-1]
     context.user_data['file_id'] = photo.file_id
-    context.user_data['step'] = 'waiting_for_time'
-    
-    quiz_data = context.user_data.get('quiz_data')
-    hashtag = context.user_data.get('quiz_hashtag')
-    
     keyboard = [
         [InlineKeyboardButton("✅ Опубликовать сейчас", callback_data="publish_now")],
         [InlineKeyboardButton("⏰ Запланировать на время", callback_data="schedule")],
         [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
     ]
-    
     await update.message.reply_text(
-        f"🖼️ Картинка сохранена!\n\n"
-        f"❓ {quiz_data['question']}\n"
-        f"🏷️ {hashtag}\n\n"
-        "Что делаем?",
+        f"🖼️ Картинка сохранена!\n\n❓ {context.user_data.get('quiz_data', {}).get('question', '?')}\n🏷️ {context.user_data.get('quiz_hashtag', '?')}\n\nЧто делаем?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# --- БЭКАП ОСНОВНОЙ БАЗЫ ---
-def backup_quizzes():
-    """Создаёт бэкап базы данных"""
-    if os.path.exists(QUIZZES_DB):
-        backup_name = f"quizzes_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-        shutil.copy2(QUIZZES_DB, backup_name)
-        return backup_name
-    return None
-
-async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /backup — скачать бэкап базы"""
-    await update.message.reply_text("💾 Создаю бэкап базы данных...")
-    
-    try:
-        backup_file = backup_quizzes()
-        
-        if not backup_file or not os.path.exists(backup_file):
-            await update.message.reply_text("❌ База данных не найдена или пуста.")
-            return
-        
-        with open(backup_file, 'rb') as f:
-            await update.message.reply_document(
-                document=f,
-                filename=os.path.basename(backup_file),
-                caption="✅ Бэкап базы данных создан!"
-            )
-        
-        os.remove(backup_file)
-        
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка при создании бэкапа: {e}")
-
-# --- БАЗОВЫЕ ВОПРОСЫ ---
-async def base_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['step'] = 'waiting_for_base_quiz_text'
-    await update.message.reply_text(
-        "📝 Отправь вопрос в формате:\n"
-        "`Вопрос (Вариант 1; Вариант 2*; Вариант 3; Вариант 4)`\n"
-        "Где * — правильный ответ"
-    )
-
-async def backup_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💾 Создаю бэкап базы базовых вопросов...")
-    
-    try:
-        backup_file = backup_base_quizzes()
-        if not backup_file or not os.path.exists(backup_file):
-            await update.message.reply_text("❌ База базовых вопросов не найдена.")
-            return
-        
-        with open(backup_file, 'rb') as f:
-            await update.message.reply_document(
-                document=f,
-                filename=os.path.basename(backup_file),
-                caption="✅ Бэкап базовых вопросов создан!"
-            )
-        os.remove(backup_file)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+# --- КАРТИНКА/ВИДЕО ДЛЯ МЕМА ---
+async def handle_meme_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('step') != 'waiting_for_meme_media':
+        return
+    await handle_meme_media(update, context)
 
 # --- ЗАПУСК ---
 def main():
     init_db()
     init_base_db()
     
-    # Запускаем фоновый поток для проверки расписания
     scheduler_thread = threading.Thread(target=scheduler_loop, daemon=True)
     scheduler_thread.start()
-    print("🔄 Планировщик запущен (проверка каждые 10 секунд)")
+    print("🔄 Планировщик запущен")
     
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("quiz", start_quiz))
+    app.add_handler(CommandHandler("meme", start_meme))
     app.add_handler(CommandHandler("my", my_quizzes))
+    app.add_handler(CommandHandler("mymemes", my_memes))
     app.add_handler(CommandHandler("cancel_all", cancel_all))
+    app.add_handler(CommandHandler("cancelallmemes", cancel_all_memes))
     app.add_handler(CommandHandler("cancel", cancel_quiz))
-    app.add_handler(CommandHandler("cancel", cancel_quiz_by_number))  # /cancel_1, /cancel_2...
+    app.add_handler(CommandHandler("cancel", cancel_quiz_by_number))
+    app.add_handler(CommandHandler("cancelmeme", cancel_meme))
+    app.add_handler(CommandHandler("cancelmeme", cancel_meme_by_number))
     app.add_handler(CommandHandler("id", get_id))
     app.add_handler(CommandHandler("view", view_command))
     app.add_handler(CommandHandler("backup", backup_command))
@@ -826,12 +893,13 @@ def main():
     app.add_handler(CommandHandler("backupbase", backup_base_command))
     
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
+    app.add_handler(MessageHandler(filters.PHOTO & filters.Regex(r'^/meme'), handle_meme_media_handler))
+    app.add_handler(MessageHandler(filters.VIDEO, handle_meme_media_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_message))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     
     print("🤖 Бот запущен!")
-    print(f"📅 Текущее время (МСК): {(datetime.now() + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')}")
     app.run_polling()
 
 if __name__ == "__main__":
