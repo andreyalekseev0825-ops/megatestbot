@@ -38,11 +38,12 @@ def init_db():
             date TEXT
         )
     ''')
-    # Таблица для запланированных викторин
+    # Таблица для запланированных викторин (с username)
     c.execute('''
         CREATE TABLE IF NOT EXISTS scheduled (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id TEXT,
+            username TEXT,
             question TEXT,
             options TEXT,
             correct_option_id INTEGER,
@@ -55,13 +56,13 @@ def init_db():
     conn.close()
     print("✅ База данных готова")
 
-def save_scheduled(chat_id, question, options, correct_option_id, hashtag, file_id, publish_time):
+def save_scheduled(chat_id, username, question, options, correct_option_id, hashtag, file_id, publish_time):
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     c.execute('''
-        INSERT INTO scheduled (chat_id, question, options, correct_option_id, hashtag, file_id, publish_time)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (chat_id, question, options, correct_option_id, hashtag, file_id, publish_time.isoformat()))
+        INSERT INTO scheduled (chat_id, username, question, options, correct_option_id, hashtag, file_id, publish_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (chat_id, username, question, options, correct_option_id, hashtag, file_id, publish_time.isoformat()))
     conn.commit()
     conn.close()
 
@@ -92,6 +93,28 @@ def get_user_scheduled(chat_id):
     c.execute('''
         SELECT id, question, publish_time FROM scheduled WHERE chat_id = ? ORDER BY publish_time
     ''', (chat_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_user_scheduled_by_chat_id(chat_id):
+    """Возвращает все запланированные викторины пользователя по chat_id (с username)"""
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, username, question, publish_time FROM scheduled WHERE chat_id = ? ORDER BY publish_time
+    ''', (chat_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_user_scheduled_by_username(username):
+    """Возвращает все запланированные викторины пользователя по username"""
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        SELECT id, chat_id, username, question, publish_time FROM scheduled WHERE username = ? ORDER BY publish_time
+    ''', (username,))
     rows = c.fetchall()
     conn.close()
     return rows
@@ -153,7 +176,7 @@ def scheduler_loop():
         except Exception as e:
             print(f"❌ Ошибка в планировщике: {e}")
         
-        time.sleep(10)  # Проверяем каждые 10 секунд
+        time.sleep(10)
 
 # --- ПАРСИНГ ВРЕМЕНИ ---
 def parse_datetime(text):
@@ -208,6 +231,7 @@ def parse_quiz(text):
         correct_option_id = 0
     return {"question": question, "options": cleaned, "correct_option_id": correct_option_id}
 
+# --- БАЗА БАЗОВЫХ ВОПРОСОВ ---
 def init_base_db():
     conn = sqlite3.connect(BASE_QUIZZES_DB)
     c = conn.cursor()
@@ -248,7 +272,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Бот для викторин\n\n"
         "📝 /quiz — создать викторину\n"
         "📋 /my — мои запланированные викторины\n"
-        "🗑️ /cancel_all — отменить все мои викторины"
+        "🗑️ /cancel_all — отменить все мои викторины\n"
+        "🔍 /view @username — посмотреть викторины другого пользователя\n"
+        "🆔 /id — показать свой ID"
     )
 
 async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -261,10 +287,10 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     reply = "📋 **Твои запланированные викторины:**\n\n"
-    for quiz_id, question, publish_time in scheduled:
-        dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)  # Показываем в МСК
-        reply += f"• {question[:40]}... → {dt.strftime('%d.%m %H:%M')}\n"
-        reply += f"  /cancel {quiz_id} — отменить эту\n"
+    for idx, (quiz_id, question, publish_time) in enumerate(scheduled, 1):
+        dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
+        reply += f"{idx}. {question[:40]}... → {dt.strftime('%d.%m %H:%M')}\n"
+        reply += f"   🆔 {quiz_id} | /cancel_{quiz_id}\n\n"
     
     await update.message.reply_text(reply)
 
@@ -272,7 +298,6 @@ async def cancel_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отменяет конкретную викторину по ID: /cancel 123"""
     chat_id = str(update.effective_user.id)
     
-    # Проверяем, есть ли аргумент
     if not context.args:
         await update.message.reply_text(
             "❌ Укажи ID викторины:\n"
@@ -289,7 +314,38 @@ async def cancel_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ ID должен быть числом. Пример: `/cancel 123`")
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
-        
+
+async def cancel_quiz_by_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отменяет викторину по порядковому номеру: /cancel_1"""
+    chat_id = str(update.effective_user.id)
+    
+    command = update.message.text
+    try:
+        number = int(command.split('_')[1])
+    except (IndexError, ValueError):
+        await update.message.reply_text(
+            "❌ Использование: `/cancel_1`, `/cancel_2` и т.д.\n"
+            "📋 /my — посмотреть все викторины с номерами"
+        )
+        return
+    
+    scheduled = get_user_scheduled(chat_id)
+    
+    if not scheduled:
+        await update.message.reply_text("📭 У тебя нет запланированных викторин.")
+        return
+    
+    if number < 1 or number > len(scheduled):
+        await update.message.reply_text(
+            f"❌ Викторины #{number} не существует.\n"
+            f"📋 У тебя {len(scheduled)} викторин. /my — посмотреть"
+        )
+        return
+    
+    quiz_id = scheduled[number - 1][0]
+    delete_user_scheduled(chat_id, quiz_id)
+    await update.message.reply_text(f"✅ Викторина #{number} отменена.")
+
 async def cancel_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Отменяет все викторины пользователя"""
     chat_id = str(update.effective_user.id)
@@ -306,7 +362,73 @@ async def start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`Как зовут персонажа (Глен; Ашра; Кацпер; Воланд*)`"
     )
 
-                      
+async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /id — показать свой chat_id"""
+    user_id = update.effective_user.id
+    username = update.effective_user.username or "без юзернейма"
+    await update.message.reply_text(
+        f"🆔 **Твой ID:** `{user_id}`\n"
+        f"👤 **Юзернейм:** @{username}\n\n"
+        "Передай этот ID или @username другому пользователю, чтобы он мог посмотреть твои викторины через `/view`."
+    )
+
+async def view_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /view @username или /view 123456789 — просмотр викторин пользователя"""
+    
+    if not context.args:
+        await update.message.reply_text(
+            "❌ Укажи пользователя:\n"
+            "`/view @username` — по юзернейму\n"
+            "`/view 123456789` — по ID"
+        )
+        return
+    
+    target = context.args[0]
+    
+    # --- ПОИСК ПО ЮЗЕРНЕЙМУ ---
+    if target.startswith('@'):
+        username = target[1:]  # убираем @
+        scheduled = get_user_scheduled_by_username(username)
+        
+        if not scheduled:
+            await update.message.reply_text(f"📭 У пользователя @{username} нет запланированных викторин.")
+            return
+        
+        chat_id = scheduled[0][1]  # берём chat_id из первой записи
+        
+        reply = f"📋 **Викторины пользователя @{username}** (`{chat_id}`):\n\n"
+        for idx, (quiz_id, _, _, question, publish_time) in enumerate(scheduled, 1):
+            dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
+            reply += f"{idx}. {question[:50]}... → {dt.strftime('%d.%m %H:%M')}\n"
+            reply += f"   🆔 {quiz_id} | /cancel_{quiz_id}\n\n"
+        
+        await update.message.reply_text(reply)
+        return
+    
+    # --- ПОИСК ПО ID ---
+    if target.isdigit():
+        scheduled = get_user_scheduled_by_chat_id(target)
+        
+        if not scheduled:
+            await update.message.reply_text(f"📭 У пользователя `{target}` нет запланированных викторин.")
+            return
+        
+        username = scheduled[0][1] if scheduled else "без_юзернейма"
+        
+        reply = f"📋 **Викторины пользователя @{username}** (`{target}`):\n\n"
+        for idx, (quiz_id, _, question, publish_time) in enumerate(scheduled, 1):
+            dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
+            reply += f"{idx}. {question[:50]}... → {dt.strftime('%d.%m %H:%M')}\n"
+            reply += f"   🆔 {quiz_id} | /cancel_{quiz_id}\n\n"
+        
+        await update.message.reply_text(reply)
+        return
+    
+    await update.message.reply_text(
+        "❌ Неправильный формат.\n"
+        "Используй: `/view @username` или `/view 123456789`"
+    )
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if not text:
@@ -364,35 +486,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- ШАГ 3: ВРЕМЯ ПУБЛИКАЦИИ ---
     if step == 'waiting_for_time':
         dt = parse_datetime(text)
-        if dt:
-            now = datetime.now()
-            if dt < now:
-                await update.message.reply_text(
-                    "❌ Время уже прошло! Укажи будущее время.\n"
-                    "Пример: `20:33` или `15.07 20:33`"
-                )
-                return
-            
-            context.user_data['publish_time'] = dt
-            context.user_data['step'] = 'waiting_for_confirmation'
-            
-            delay = int((dt - now).total_seconds())
-            msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
-            
-            keyboard = [
-                [InlineKeyboardButton("✅ Запланировать", callback_data="confirm_publish")],
-                [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
-            ]
-            
-            await update.message.reply_text(
-                f"📅 **Публикация:** {msk_time} МСК\n"
-                f"⏳ **Осталось:** {delay} секунд\n\n"
-                "❓ " + context.user_data['quiz_data']['question'] + "\n"
-                "🏷️ " + context.user_data['quiz_hashtag'] + "\n\n"
-                "✅ Подтверждаешь?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        else:
+        if dt is None:
             await update.message.reply_text(
                 "❌ Не понял формат времени.\n\n"
                 "Примеры:\n"
@@ -400,6 +494,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "`15.07 20:33` — 15 июля в 20:33\n"
                 "`15.07.2026 20:33` — 15 июля 2026 в 20:33"
             )
+            return
+        
+        if not isinstance(dt, datetime):
+            await update.message.reply_text("❌ Ошибка: время не распознано как дата. Попробуй ещё раз.")
+            return
+        
+        now = datetime.now()
+        if dt < now:
+            await update.message.reply_text(
+                "❌ Время уже прошло! Укажи будущее время.\n"
+                "Пример: `20:33` или `15.07 20:33`"
+            )
+            return
+        
+        context.user_data['publish_time'] = dt
+        context.user_data['step'] = 'waiting_for_confirmation'
+        
+        delay = int((dt - now).total_seconds())
+        msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Запланировать", callback_data="confirm_publish")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
+        ]
+        
+        await update.message.reply_text(
+            f"📅 **Публикация:** {msk_time} МСК\n"
+            f"⏳ **Осталось:** {delay} секунд\n\n"
+            "❓ " + context.user_data['quiz_data']['question'] + "\n"
+            "🏷️ " + context.user_data['quiz_hashtag'] + "\n\n"
+            "✅ Подтверждаешь?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return
     
     # --- ШАГ 4: СВОЙ ХЭШТЕГ ---
@@ -412,7 +539,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ Хэштег: {text}\n\n"
             "🖼️ Отправь картинку для поста.\n\n"
-            "После картинки укажи время публикации (например, 20:33)"
+            "После картинки выбери действие."
         )
         return
     
@@ -425,7 +552,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/my — мои запланированные викторины\n"
         "/cancel_all — отменить все мои викторины\n"
         "/backup — бэкап основной базы\n"
-        "/backupbase — бэкап базы вопросов"
+        "/backupbase — бэкап базы вопросов\n"
+        "/id — показать свой ID\n"
+        "/view @username — посмотреть викторины другого пользователя"
     )
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -466,6 +595,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- ПОДТВЕРЖДЕНИЕ ПУБЛИКАЦИИ (с таймером) ---
     if data == "confirm_publish":
         chat_id = str(update.effective_user.id)
+        username = update.effective_user.username or "без_юзернейма"
         quiz_data = context.user_data.get('quiz_data')
         hashtag = context.user_data.get('quiz_hashtag')
         file_id = context.user_data.get('file_id')
@@ -478,6 +608,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         save_scheduled(
             chat_id,
+            username,
             quiz_data['question'],
             '|||'.join(quiz_data['options']),
             quiz_data['correct_option_id'],
@@ -563,8 +694,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await query.edit_message_text("❌ Неизвестная команда.")
-            
-      
+
 async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('step') != 'waiting_for_custom_hashtag':
         return
@@ -579,7 +709,7 @@ async def handle_custom_hashtag(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text(
         f"✅ Хэштег: {text}\n\n"
         "🖼️ Отправь картинку для поста.\n\n"
-        "После картинки укажи время публикации (например, 20:33)"
+        "После картинки выбери действие."
     )
 
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -610,8 +740,8 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Что делаем?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    
 
+# --- БЭКАП ОСНОВНОЙ БАЗЫ ---
 def backup_quizzes():
     """Создаёт бэкап базы данных"""
     if os.path.exists(QUIZZES_DB):
@@ -631,7 +761,6 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ База данных не найдена или пуста.")
             return
         
-        # Отправляем файл
         with open(backup_file, 'rb') as f:
             await update.message.reply_document(
                 document=f,
@@ -639,12 +768,12 @@ async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption="✅ Бэкап базы данных создан!"
             )
         
-        # Удаляем временный файл после отправки
         os.remove(backup_file)
         
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка при создании бэкапа: {e}")
 
+# --- БАЗОВЫЕ ВОПРОСЫ ---
 async def base_quiz_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['step'] = 'waiting_for_base_quiz_text'
     await update.message.reply_text(
@@ -671,7 +800,7 @@ async def backup_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         os.remove(backup_file)
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка: {e}")
-    
+
 # --- ЗАПУСК ---
 def main():
     init_db()
@@ -689,14 +818,17 @@ def main():
     app.add_handler(CommandHandler("my", my_quizzes))
     app.add_handler(CommandHandler("cancel_all", cancel_all))
     app.add_handler(CommandHandler("cancel", cancel_quiz))
+    app.add_handler(CommandHandler("cancel", cancel_quiz_by_number))  # /cancel_1, /cancel_2...
+    app.add_handler(CommandHandler("id", get_id))
+    app.add_handler(CommandHandler("view", view_command))
+    app.add_handler(CommandHandler("backup", backup_command))
+    app.add_handler(CommandHandler("basequiz", base_quiz_command))
+    app.add_handler(CommandHandler("backupbase", backup_base_command))
     
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Regex(r'^#'), handle_custom_hashtag))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
-    app.add_handler(CommandHandler("backup", backup_command))
-    app.add_handler(CommandHandler("basequiz", base_quiz_command))
-    app.add_handler(CommandHandler("backupbase", backup_base_command))
     
     print("🤖 Бот запущен!")
     print(f"📅 Текущее время (МСК): {(datetime.now() + timedelta(hours=3)).strftime('%Y-%m-%d %H:%M:%S')}")
