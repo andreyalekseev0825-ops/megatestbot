@@ -826,7 +826,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Неправильный формат.\nНужно: `Вопрос (А; Б*; В; Г)`")
         context.user_data['step'] = None
         return
+        
+    # --- ТЕКСТ ДЛЯ МЕМА ---
+    if step == 'waiting_for_meme_post_text':
+        context.user_data['meme_post_text'] = text
+        context.user_data['step'] = 'waiting_for_meme_hashtag'
     
+        keyboard = [
+        [InlineKeyboardButton("✅ Добавить #ФлудНаПМ", callback_data="meme_hashtag_add")],
+        [InlineKeyboardButton("⏭️ Пропустить", callback_data="meme_hashtag_skip")]
+    ]
+    
+        await update.message.reply_text(
+            f"✅ Текст сохранён:\n\n{text}\n\n"
+            "📝 Добавить хэштег #ФлудНаПМ?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
     # --- ВРЕМЯ ДЛЯ МЕМА ---
     if step == 'waiting_for_meme_time':
         await handle_meme_time(update, context)
