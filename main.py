@@ -248,8 +248,8 @@ def reminder_loop():
             # Например: 12:30 по админу → 07:30 UTC
             # Но в БД хранится UTC, поэтому ищем по UTC
             reminder_times = [
-                {"hour": 9, "minute": 40, "start_remind": 9, "start_minute": 25},
-                {"hour": 10, "minute": 30, "start_remind": 13, "start_minute": 5},
+                {"hour": 12, "minute": 30, "start_remind": 10, "start_minute": 5},
+                {"hour": 13, "minute": 30, "start_remind": 13, "start_minute": 5},
                 {"hour": 14, "minute": 30, "start_remind": 14, "start_minute": 5},
             ]
             
@@ -763,76 +763,116 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         await update.message.reply_text("❌ Отправь текст")
         return
+    
+    # --- СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ ---
+    chat_id = str(update.effective_user.id)
+    username = update.effective_user.username or "без_юзернейма"
+    save_user(chat_id, username)
+    
     step = context.user_data.get('step')
     
-    # Базовый вопрос
+    # --- БАЗОВЫЙ ВОПРОС ---
     if step == 'waiting_for_base_quiz_text':
         parsed = parse_quiz(text)
         if parsed and len(parsed['options']) >= 2:
             save_base_quiz(parsed['question'], '|||'.join(parsed['options']), parsed['correct_option_id'])
             await update.message.reply_text(f"✅ Вопрос сохранён!\n❓ {parsed['question']}")
         else:
-            await update.message.reply_text("❌ Неправильный формат.")
+            await update.message.reply_text("❌ Неправильный формат.\nНужно: `Вопрос (А; Б*; В; Г)`")
         context.user_data['step'] = None
         return
     
-    # Время для мема
+    # --- ВРЕМЯ ДЛЯ МЕМА ---
     if step == 'waiting_for_meme_time':
         await handle_meme_time(update, context)
         return
     
-    # Текст викторины
+    # --- ТЕКСТ ДЛЯ ПОСТА ---
+    if step == 'waiting_for_post_text':
+        context.user_data['post_text'] = text
+        context.user_data['step'] = 'waiting_for_image'
+        await update.message.reply_text(
+            f"✅ Текст сохранён:\n\n{text}\n\n🖼️ Теперь отправь картинку."
+        )
+        return
+    
+    # --- ТЕКСТ ВИКТОРИНЫ ---
     if step == 'waiting_for_quiz_text':
         parsed = parse_quiz(text)
         if parsed and len(parsed['options']) >= 2:
             context.user_data['quiz_data'] = parsed
             context.user_data['step'] = 'waiting_for_hashtag'
+            
             keyboard = []
             for hashtag in HASHTAGS:
                 keyboard.append([InlineKeyboardButton(hashtag, callback_data=f"hashtag_{hashtag}")])
             keyboard.append([InlineKeyboardButton("✏️ Свой", callback_data="hashtag_custom")])
+            
             await update.message.reply_text(
-                f"❓ {parsed['question']}\n✅ Правильный ответ: {parsed['options'][parsed['correct_option_id']]}\n\n🏷️ Выбери хэштег:",
+                f"❓ {parsed['question']}\n"
+                f"✅ Правильный ответ: {parsed['options'][parsed['correct_option_id']]}\n\n"
+                "🏷️ Выбери хэштег:",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
             await update.message.reply_text("❌ Неправильный формат. Пример: `Вопрос (А; Б*; В; Г)`")
         return
     
-    # Время для викторины
+    # --- ВРЕМЯ ДЛЯ ВИКТОРИНЫ ---
     if step == 'waiting_for_time':
         dt = parse_datetime(text)
         if dt is None:
-            await update.message.reply_text("❌ Не понял формат. Пример: `20:33`")
+            await update.message.reply_text("❌ Не понял формат. Пример: `20:33` или `08.07 20:33`")
             return
+        
         now = datetime.now()
         if dt < now:
-            await update.message.reply_text("❌ Время уже прошло!")
+            await update.message.reply_text("❌ Время уже прошло! Укажи будущее время.")
             return
+        
         context.user_data['publish_time'] = dt
         context.user_data['step'] = 'waiting_for_confirmation'
+        
         delay = int((dt - now).total_seconds())
         msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
+        
         keyboard = [
             [InlineKeyboardButton("✅ Запланировать", callback_data="confirm_publish")],
             [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
         ]
+        
         await update.message.reply_text(
-            f"📅 **Публикация:** {msk_time} МСК\n⏳ Осталось: {delay} сек\n\n❓ {context.user_data['quiz_data']['question']}\n🏷️ {context.user_data['quiz_hashtag']}\n\n✅ Подтверждаешь?",
+            f"📅 **Публикация:** {msk_time} МСК\n"
+            f"⏳ **Осталось:** {delay} сек\n\n"
+            f"❓ {context.user_data['quiz_data']['question']}\n"
+            f"🏷️ {context.user_data['quiz_hashtag']}\n"
+            f"📝 {context.user_data.get('post_text', 'Без текста')}\n\n"
+            "✅ Подтверждаешь?",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
     
-    # Свой хэштег
+    # --- СВОЙ ХЭШТЕГ ---
     if step == 'waiting_for_custom_hashtag':
         text = text.strip()
         if not text.startswith('#'):
             text = '#' + text
         context.user_data['quiz_hashtag'] = text
-        context.user_data['step'] = 'waiting_for_image'
-        await update.message.reply_text(f"✅ Хэштег: {text}\n\n🖼️ Отправь картинку.")
+        context.user_data['step'] = 'waiting_for_post_text'
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Добавить текст", callback_data="add_text_yes")],
+            [InlineKeyboardButton("⏭️ Без текста", callback_data="add_text_no")]
+        ]
+        
+        await update.message.reply_text(
+            f"✅ Хэштег: {text}\n\n"
+            "📝 Добавить текст к посту?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return
     
+    # --- ЛЮБОЙ ДРУГОЙ ТЕКСТ ---
     await update.message.reply_text(
         "❓ Я не понял.\n\n"
         "Команды:\n"
@@ -853,37 +893,65 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     print(f"🔘 Нажата кнопка: {data}")
     
-    # Хэштеги для мема
+    # --- ХЭШТЕГИ ДЛЯ МЕМА ---
     if data in ["meme_hashtag_add", "meme_hashtag_skip"]:
         await meme_hashtag_callback(update, context)
         return
     
-    # Кнопки мема
+    # --- КНОПКИ МЕМА ---
     if data in ["meme_publish_now", "meme_schedule", "meme_cancel"]:
         await meme_button_callback(update, context)
         return
     
-    # Выбор хэштега
+    # --- ВЫБОР ХЭШТЕГА (ДЛЯ ВИКТОРИНЫ) ---
     if data.startswith("hashtag_"):
         hashtag = data.replace("hashtag_", "")
+        
         if hashtag == "custom":
             await query.edit_message_text("✏️ Напиши свой хэштег (например, #МойХэштег)")
             context.user_data['step'] = 'waiting_for_custom_hashtag'
             return
+        
         context.user_data['quiz_hashtag'] = hashtag
-        context.user_data['step'] = 'waiting_for_image'
+        context.user_data['step'] = 'waiting_for_post_text'
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Добавить текст", callback_data="add_text_yes")],
+            [InlineKeyboardButton("⏭️ Без текста", callback_data="add_text_no")]
+        ]
+        
         await query.edit_message_text(
-            f"✅ Хэштег: {hashtag}\n\n🖼️ Отправь картинку для поста.\n\nПосле картинки выбери действие."
+            f"✅ Хэштег: {hashtag}\n\n"
+            "📝 Добавить текст к посту?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
     
-    # Запланировать
+    # --- ДОБАВИТЬ ТЕКСТ К ПОСТУ ---
+    if data == "add_text_yes":
+        context.user_data['step'] = 'waiting_for_post_text'
+        await query.edit_message_text(
+            "📝 Напиши текст, который добавится к посту.\n\n"
+            "(Это будет подпись к картинке)"
+        )
+        return
+    
+    if data == "add_text_no":
+        context.user_data['post_text'] = None
+        context.user_data['step'] = 'waiting_for_image'
+        await query.edit_message_text(
+            "⏭️ Без текста.\n\n"
+            "🖼️ Отправь картинку для поста."
+        )
+        return
+    
+    # --- ЗАПЛАНИРОВАТЬ ---
     if data == "schedule":
         context.user_data['step'] = 'waiting_for_time'
         await query.edit_message_text("📅 **Укажи время публикации** (МСК):\nНапример: `20:33`")
         return
     
-    # Подтверждение публикации
+    # --- ПОДТВЕРЖДЕНИЕ ПУБЛИКАЦИИ ---
     if data == "confirm_publish":
         chat_id = str(update.effective_user.id)
         username = update.effective_user.username or "без_юзернейма"
@@ -891,48 +959,95 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         hashtag = context.user_data.get('quiz_hashtag')
         file_id = context.user_data.get('file_id')
         publish_time = context.user_data.get('publish_time')
+        post_text = context.user_data.get('post_text')
+        caption = context.user_data.get('caption')
+        
         if not quiz_data or not hashtag or not file_id or not publish_time:
             await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
             context.user_data.clear()
             return
+        
         save_scheduled(chat_id, username, quiz_data['question'], '|||'.join(quiz_data['options']), quiz_data['correct_option_id'], hashtag, file_id, publish_time)
         msk_time = (publish_time + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
         delay = int((publish_time - datetime.now()).total_seconds())
-        await query.edit_message_text(f"✅ Викторина запланирована на **{msk_time}** МСК!\n⏳ Осталось: {delay} сек\n📋 /my — посмотреть все")
+        
+        await query.edit_message_text(
+            f"✅ Викторина запланирована на **{msk_time}** МСК!\n"
+            f"⏳ Осталось: {delay} сек\n"
+            f"🏷️ {hashtag}\n"
+            f"📝 {post_text if post_text else 'Без текста'}\n"
+            "📋 /my — посмотреть все"
+        )
         context.user_data.clear()
         return
     
-    # Моментальная публикация
+    # --- МОМЕНТАЛЬНАЯ ПУБЛИКАЦИЯ ---
     if data == "publish_now":
         quiz_data = context.user_data.get('quiz_data')
         hashtag = context.user_data.get('quiz_hashtag')
         file_id = context.user_data.get('file_id')
+        post_text = context.user_data.get('post_text')
+        
         if not quiz_data or not hashtag or not file_id:
             await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
             context.user_data.clear()
             return
+        
         await query.edit_message_text("📤 Публикую викторину сейчас...")
+        
         try:
-            caption = f"Викторина\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+            # Формируем подпись
+            caption = f"Викторина\n{hashtag}"
+            if post_text:
+                caption += f"\n\n{post_text}"
+            caption += f"\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+            
+            # Отправляем фото
             url_photo = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-            requests.post(url_photo, data={"chat_id": CHANNEL_ID, "photo": file_id, "caption": caption, "parse_mode": "HTML"})
+            requests.post(url_photo, data={
+                "chat_id": CHANNEL_ID,
+                "photo": file_id,
+                "caption": caption,
+                "parse_mode": "HTML"
+            })
+            
+            # Отправляем опрос
             url_poll = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPoll"
-            resp = requests.post(url_poll, json={"chat_id": CHANNEL_ID, "question": quiz_data['question'], "options": quiz_data['options'], "type": "quiz", "correct_option_id": quiz_data['correct_option_id'], "is_anonymous": True})
+            resp = requests.post(url_poll, json={
+                "chat_id": CHANNEL_ID,
+                "question": quiz_data['question'],
+                "options": quiz_data['options'],
+                "type": "quiz",
+                "correct_option_id": quiz_data['correct_option_id'],
+                "is_anonymous": True
+            })
+            
             if resp.json().get('ok'):
                 conn = sqlite3.connect(QUIZZES_DB)
                 c = conn.cursor()
-                c.execute('INSERT INTO quizzes (question, options, correct_option_id, hashtag, date) VALUES (?, ?, ?, ?, ?)', (quiz_data['question'], '|||'.join(quiz_data['options']), quiz_data['correct_option_id'], hashtag, datetime.now().isoformat()))
+                c.execute('''
+                    INSERT INTO quizzes (question, options, correct_option_id, hashtag, date)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (quiz_data['question'], '|||'.join(quiz_data['options']), quiz_data['correct_option_id'], hashtag, datetime.now().isoformat()))
                 conn.commit()
                 conn.close()
-                await query.edit_message_text(f"✅ Викторина ОПУБЛИКОВАНА!\n❓ {quiz_data['question']}\n🏷️ {hashtag}")
+                
+                await query.edit_message_text(
+                    f"✅ Викторина ОПУБЛИКОВАНА!\n\n"
+                    f"❓ {quiz_data['question']}\n"
+                    f"🏷️ {hashtag}\n"
+                    f"📝 {post_text if post_text else 'Без текста'}"
+                )
             else:
                 await query.edit_message_text(f"❌ Ошибка: {resp.json()}")
+                
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
+        
         context.user_data.clear()
         return
     
-    # Отмена
+    # --- ОТМЕНА ---
     if data == "cancel_publish":
         await query.edit_message_text("❌ Отменено.")
         context.user_data.clear()
@@ -947,15 +1062,35 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo:
         await update.message.reply_text("❌ Отправь именно картинку")
         return
+
     photo = update.message.photo[-1]
     context.user_data['file_id'] = photo.file_id
+
+    # Получаем данные
+    hashtag = context.user_data.get('quiz_hashtag')
+    post_text = context.user_data.get('post_text')
+    quiz_data = context.user_data.get('quiz_data')
+
+    # Формируем подпись с поддержкой текста
+    caption = f"Викторина\n{hashtag}"
+    if post_text:
+        caption += f"\n\n{post_text}"
+    caption += f"\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+
+    context.user_data['caption'] = caption
+
     keyboard = [
         [InlineKeyboardButton("✅ Опубликовать сейчас", callback_data="publish_now")],
         [InlineKeyboardButton("⏰ Запланировать на время", callback_data="schedule")],
         [InlineKeyboardButton("❌ Отмена", callback_data="cancel_publish")]
     ]
+
     await update.message.reply_text(
-        f"🖼️ Картинка сохранена!\n\n❓ {context.user_data.get('quiz_data', {}).get('question', '?')}\n🏷️ {context.user_data.get('quiz_hashtag', '?')}\n\nЧто делаем?",
+        f"🖼️ Картинка сохранена!\n\n"
+        f"❓ {quiz_data['question'] if quiz_data else '?'}\n"
+        f"🏷️ {hashtag}\n"
+        f"📝 {post_text if post_text else 'Без текста'}\n\n"
+        "Что делаем?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
