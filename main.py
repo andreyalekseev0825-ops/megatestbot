@@ -706,12 +706,18 @@ async def handle_meme_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_id = context.user_data.get('meme_file_id')
     file_type = context.user_data.get('meme_file_type')
     hashtag = context.user_data.get('meme_hashtag', '#мемло')
-    save_meme(chat_id, username, file_id, file_type, hashtag, dt)
+    post_text = context.user_data.get('meme_post_text')
+    save_meme(chat_id, username, file_id, file_type, hashtag, post_text, dt)
     msk_time = (dt + timedelta(hours=3)).strftime('%d.%m.%Y в %H:%M')
     delay = int((dt - now).total_seconds())
-    await update.message.reply_text(f"✅ Мем запланирован на **{msk_time}** МСК!\n⏳ Осталось: {delay} сек\n🏷️ {hashtag}")
+    await update.message.reply_text(
+        f"✅ Мем запланирован на **{msk_time}** МСК!\n"
+        f"⏳ Осталось: {delay} сек\n"
+        f"🏷️ {hashtag}\n"
+        f"📝 {post_text if post_text else 'Без текста'}"
+    )
     context.user_data.clear()
-
+    
 async def my_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_user.id)
     memes = get_user_memes(chat_id)
