@@ -244,8 +244,8 @@ def reminder_loop():
             
             # Время для напоминаний: 17:30, 18:30, 19:30 (МСК)
             reminder_times = [
-                {"hour": 8, "minute": 00, "start_remind": 7, "start_minute": 50},
-                {"hour": 8, "minute": 00, "start_remind": 7, "start_minute": 55},
+                {"hour": 17, "minute": 00, "start_remind": 8, "start_minute": 20},
+                {"hour": 17, "minute": 00, "start_remind": 8, "start_minute": 25},
                 {"hour": 15, "minute": 30, "start_remind": 15, "start_minute": 5},
                 {"hour": 16, "minute": 30, "start_remind": 16, "start_minute": 5}
             ]
