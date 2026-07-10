@@ -803,6 +803,8 @@ async def backup_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 # --- ОСНОВНОЙ ОБРАБОТЧИК ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    print(f"📩 Текст: {text}")
+    print(f"📍 Шаг: {context.user_data.get('step')}")
     if not text:
         await update.message.reply_text("❌ Отправь текст")
         return
