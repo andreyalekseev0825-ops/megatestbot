@@ -924,26 +924,27 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     # --- ТЕКСТ ДЛЯ МЕМА ---
-    if data == "meme_add_text_yes":
-        context.user_data['step'] = 'waiting_for_meme_post_text'
-        await query.edit_message_text(
-            "📝 Напиши текст, который добавится к мему.\n\n"
-            "(Это будет подпись к картинке/видео)"
+    # --- ТЕКСТ ДЛЯ МЕМА ---
+    if data == "meme_text_yes":
+            context.user_data['step'] = 'waiting_for_meme_post_text'
+            await query.edit_message_text(
+            "📝 Напиши текст для мема.\n\n"
+            "Он будет подписью к картинке/видео."
         )
         return
-    
-    if data == "meme_add_text_no":
+
+    if data == "meme_text_no":
         context.user_data['meme_post_text'] = None
-        context.user_data['step'] = 'waiting_for_meme_action'
-        
+        context.user_data['step'] = 'waiting_for_meme_hashtag'
+    
         keyboard = [
-            [InlineKeyboardButton("✅ Опубликовать сейчас", callback_data="meme_publish_now")],
-            [InlineKeyboardButton("⏰ Запланировать на время", callback_data="meme_schedule")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="meme_cancel")]
-        ]
-        
+        [InlineKeyboardButton("✅ Добавить #ФлудНаПМ", callback_data="meme_hashtag_add")],
+        [InlineKeyboardButton("⏭️ Пропустить", callback_data="meme_hashtag_skip")]
+    ]
+    
         await query.edit_message_text(
-            "⏭️ Без текста.\n\nЧто делаем с мемом?",
+            "⏭️ Без текста.\n\n"
+            "📝 Добавить хэштег #ФлудНаПМ?",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
