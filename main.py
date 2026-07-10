@@ -924,13 +924,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # --- ПОДТВЕРЖДЕНИЕ ПУБЛИКАЦИИ ---
     # --- ПОДТВЕРЖДЕНИЕ ПУБЛИКАЦИИ ---
-if data == "confirm_publish":
-    chat_id = str(update.effective_user.id)
-    username = update.effective_user.username or "без_юзернейма"
-    quiz_data = context.user_data.get('quiz_data')
-    hashtag = context.user_data.get('quiz_hashtag')
-    file_id = context.user_data.get('file_id')
-    publish_time = context.user_data.get('publish_time')
+    if data == "confirm_publish":
+        chat_id = str(update.effective_user.id)
+        username = update.effective_user.username or "без_юзернейма"
+        quiz_data = context.user_data.get('quiz_data')
+        hashtag = context.user_data.get('quiz_hashtag')
+        file_id = context.user_data.get('file_id')
+        publish_time = context.user_data.get('publish_time')
     
     if not quiz_data or not hashtag or not file_id or not publish_time:
         await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
@@ -957,15 +957,15 @@ if data == "confirm_publish":
         f"🏷️ {hashtag}\n"
         "📋 /my — посмотреть все"
     )
-    context.user_data.clear()
-    return
+       context.user_data.clear()
+       return
     
     # --- МОМЕНТАЛЬНАЯ ПУБЛИКАЦИЯ ---
     # --- МОМЕНТАЛЬНАЯ ПУБЛИКАЦИЯ (для викторин) ---
-if data == "publish_now":
-    quiz_data = context.user_data.get('quiz_data')
-    hashtag = context.user_data.get('quiz_hashtag')
-    file_id = context.user_data.get('file_id')
+   if data == "publish_now":
+       quiz_data = context.user_data.get('quiz_data')
+       hashtag = context.user_data.get('quiz_hashtag')
+       file_id = context.user_data.get('file_id')
     
     if not quiz_data or not hashtag or not file_id:
         await query.edit_message_text("❌ Ошибка. Начни заново через /quiz")
