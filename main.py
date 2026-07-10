@@ -141,13 +141,14 @@ def delete_user_scheduled(chat_id, quiz_id=None):
     conn.close()
 
 # --- ФУНКЦИИ ДЛЯ МЕМОВ ---
-def save_meme(chat_id, username, file_id, file_type, hashtag, publish_time):
+# --- ФУНКЦИИ ДЛЯ МЕМОВ ---
+def save_meme(chat_id, username, file_id, file_type, hashtag, post_text, publish_time):
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     c.execute('''
-        INSERT INTO memes (chat_id, username, file_id, file_type, hashtag, publish_time)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (chat_id, username, file_id, file_type, hashtag, publish_time.isoformat()))
+        INSERT INTO memes (chat_id, username, file_id, file_type, hashtag, post_text, publish_time)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (chat_id, username, file_id, file_type, hashtag, post_text, publish_time.isoformat()))
     conn.commit()
     conn.close()
 
@@ -631,32 +632,59 @@ async def meme_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     data = query.data
+
     if data == "meme_publish_now":
         file_id = context.user_data.get('meme_file_id')
         file_type = context.user_data.get('meme_file_type')
         hashtag = context.user_data.get('meme_hashtag', '#мемло')
+        post_text = context.user_data.get('meme_post_text')
+
         if not file_id:
             await query.edit_message_text("❌ Ошибка. Начни заново через /meme")
             context.user_data.clear()
             return
+
         await query.edit_message_text("📤 Публикую мем сейчас...")
+
         try:
-            caption = f"Мем\n{hashtag}\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+            caption = f"Мем\n{hashtag}"
+            if post_text:
+                caption += f"\n\n{post_text}"
+            caption += f"\n\n<a href=\"{SUGGESTION_LINK}\">ТрясЛо №993 | Скинуть что-нибудь в предложку</a>"
+
             if file_type == 'photo':
                 url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-                requests.post(url, data={"chat_id": CHANNEL_ID, "photo": file_id, "caption": caption, "parse_mode": "HTML"})
+                requests.post(url, data={
+                    "chat_id": CHANNEL_ID,
+                    "photo": file_id,
+                    "caption": caption,
+                    "parse_mode": "HTML"
+                })
             else:
                 url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
-                requests.post(url, data={"chat_id": CHANNEL_ID, "video": file_id, "caption": caption, "parse_mode": "HTML"})
-            await query.edit_message_text(f"✅ Мем ОПУБЛИКОВАН!\n🏷️ {hashtag}")
+                requests.post(url, data={
+                    "chat_id": CHANNEL_ID,
+                    "video": file_id,
+                    "caption": caption,
+                    "parse_mode": "HTML"
+                })
+
+            await query.edit_message_text(
+                f"✅ Мем ОПУБЛИКОВАН!\n\n"
+                f"🏷️ {hashtag}\n"
+                f"📝 {post_text if post_text else 'Без текста'}"
+            )
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
+
         context.user_data.clear()
         return
+
     if data == "meme_schedule":
         context.user_data['step'] = 'waiting_for_meme_time'
         await query.edit_message_text("📅 **Укажи время публикации** (МСК):\nНапример: `20:33`")
         return
+
     if data == "meme_cancel":
         await query.edit_message_text("❌ Отменено.")
         context.user_data.clear()
