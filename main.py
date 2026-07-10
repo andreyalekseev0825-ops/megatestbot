@@ -897,23 +897,23 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # --- ВЫБОР ХЭШТЕГА (ДЛЯ ВИКТОРИНЫ) ---
     # --- ВЫБОР ХЭШТЕГА (ДЛЯ ВИКТОРИНЫ) ---
-if data.startswith("hashtag_"):
-    hashtag = data.replace("hashtag_", "")
+    if data.startswith("hashtag_"):
+        hashtag = data.replace("hashtag_", "")
     
-    if hashtag == "custom":
-        await query.edit_message_text("✏️ Напиши свой хэштег (например, #МойХэштег)")
-        context.user_data['step'] = 'waiting_for_custom_hashtag'
+        if hashtag == "custom":
+            await query.edit_message_text("✏️ Напиши свой хэштег (например, #МойХэштег)")
+            context.user_data['step'] = 'waiting_for_custom_hashtag'
+            return
+    
+        context.user_data['quiz_hashtag'] = hashtag
+        context.user_data['step'] = 'waiting_for_image'  # <-- СРАЗУ НА КАРТИНКУ
+    
+        await query.edit_message_text(
+            f"✅ Хэштег: {hashtag}\n\n"
+            "🖼️ Отправь картинку для поста.\n\n"
+            "После картинки выбери действие."
+        )
         return
-    
-    context.user_data['quiz_hashtag'] = hashtag
-    context.user_data['step'] = 'waiting_for_image'  # <-- СРАЗУ НА КАРТИНКУ
-    
-    await query.edit_message_text(
-        f"✅ Хэштег: {hashtag}\n\n"
-        "🖼️ Отправь картинку для поста.\n\n"
-        "После картинки выбери действие."
-    )
-    return
   
     
     # --- ЗАПЛАНИРОВАТЬ ---
