@@ -63,6 +63,7 @@ def init_db():
             file_id TEXT,
             file_type TEXT,
             hashtag TEXT,
+            post_text TEXT, 
             publish_time TEXT
         )
     ''')
