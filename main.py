@@ -203,8 +203,6 @@ def get_today_memes_by_time(chat_id, target_hour, target_minute):
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     today_end = now_utc.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
 
-    print(f"🔍 Ищу мемы в БД на {target_hour:02d}:{target_minute:02d} UTC")
-    print(f"📅 Диапазон: {today_start} - {today_end}")
     
     # Целевое время в UTC (МСК - 3 часа)
     target_utc_hour = target_hour - 3
