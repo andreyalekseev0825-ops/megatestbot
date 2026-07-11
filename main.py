@@ -202,9 +202,12 @@ def get_today_memes_by_time(chat_id, target_hour, target_minute):
     now_utc = datetime.now() - timedelta(hours=3)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     today_end = now_utc.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
+
+    print(f"🔍 Ищу мемы в БД на {target_hour:02d}:{target_minute:02d} UTC")
+    print(f"📅 Диапазон: {today_start} - {today_end}")
     
     # Целевое время в UTC (МСК - 3 часа)
-    target_utc_hour = target_hour - 2
+    target_utc_hour = target_hour - 3
     if target_utc_hour < 0:
         target_utc_hour += 24
     
@@ -247,7 +250,7 @@ def reminder_loop():
             
             # --- НАПОМИНАЛКИ (ПО ТВОЕМУ ВРЕМЕНИ UTC+2) ---
             reminder_times = [
-                {"hour": 17, "minute": 30, "start_remind": 17, "start_minute": 5},  # 17:30 по твоему времени
+                {"hour": 20, "minute": 30, "start_remind": 19, "start_minute": 45},  # 17:30 по твоему времени
                 {"hour": 18, "minute": 30, "start_remind": 18, "start_minute": 5},  # 18:30 по твоему времени
                 {"hour": 19, "minute": 30, "start_remind": 19, "start_minute": 5},  # 19:30 по твоему времени
             ]
@@ -380,7 +383,7 @@ def parse_datetime(text):
                 dt = dt + timedelta(days=1)
             else:
                 dt = dt.replace(year=now.year + 1)
-        dt = dt - timedelta(hours=3)
+        dt = dt - timedelta(hours=2)
         return dt
     
     # --- ДАТА + ВРЕМЯ С ГОДОМ (08.07.2026 20:33) ---
@@ -388,7 +391,7 @@ def parse_datetime(text):
     if match:
         day, month, year, hour, minute = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
         dt = datetime(year, month, day, hour, minute)
-        dt = dt - timedelta(hours=3)
+        dt = dt - timedelta(hours=2)
         return dt
     
     return None
