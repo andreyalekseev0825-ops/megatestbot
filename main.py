@@ -204,7 +204,7 @@ def get_today_memes_by_time(chat_id, target_hour, target_minute):
     today_end = now_utc.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
     
     # Целевое время в UTC (МСК - 3 часа)
-    target_utc_hour = target_hour - 3
+    target_utc_hour = target_hour - 2
     if target_utc_hour < 0:
         target_utc_hour += 24
     
@@ -365,7 +365,7 @@ def parse_datetime(text):
         dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if dt < now:
             dt = dt + timedelta(days=1)
-        dt = dt - timedelta(hours=3)
+        dt = dt - timedelta(hours=2)
         return dt
     
     # --- ДАТА + ВРЕМЯ (08.07 20:33) ---
