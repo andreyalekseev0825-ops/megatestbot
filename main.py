@@ -234,37 +234,34 @@ def send_reminder(bot_token, chat_id, time_str):
         print(f"❌ Ошибка отправки напоминания: {e}")
 # --- ОТДЕЛЬНЫЙ ПОТОК ДЛЯ НАПОМИНАНИЙ ---
 def reminder_loop():
-    """Отдельный поток для напоминаний о мемах (по времени админа UTC+5)"""
+    """Отдельный поток для напоминаний о мемах (по времени UTC+2)"""
     while True:
         try:
             now_utc = datetime.now()
             
-            # --- ВРЕМЯ ДЛЯ АДМИНА (UTC+5) ---
-            now_admin = now_utc + timedelta(hours=5)
-            current_hour = now_admin.hour
-            current_minute = now_admin.minute
-            today_str = now_admin.strftime('%Y-%m-%d')
+            # --- ТВОЁ ВРЕМЯ (UTC+2) ---
+            now_user = now_utc + timedelta(hours=2)
+            current_hour = now_user.hour
+            current_minute = now_user.minute
+            today_str = now_user.strftime('%Y-%m-%d')
             
-            # --- ВРЕМЯ ДЛЯ ПОИСКА В БД (UTC) ---
-            # Админское время (UTC+5) → UTC (вычитаем 5 часов)
-            # Например: 12:30 по админу → 07:30 UTC
-            # Но в БД хранится UTC, поэтому ищем по UTC
+            # --- НАПОМИНАЛКИ (ПО ТВОЕМУ ВРЕМЕНИ UTC+2) ---
             reminder_times = [
-                {"hour": 14, "minute": 30, "start_remind": 19, "start_minute": 5},
-                {"hour": 15, "minute": 30, "start_remind": 20, "start_minute": 5},
-                {"hour": 16, "minute": 30, "start_remind": 21, "start_minute": 5},
+                {"hour": 17, "minute": 30, "start_remind": 17, "start_minute": 5},  # 17:30 по твоему времени
+                {"hour": 18, "minute": 30, "start_remind": 18, "start_minute": 5},  # 18:30 по твоему времени
+                {"hour": 19, "minute": 30, "start_remind": 19, "start_minute": 5},  # 19:30 по твоему времени
             ]
             
             for rt in reminder_times:
-                # Проверяем, что сейчас время для напоминания (по админу)
+                # Проверяем, что сейчас время для напоминания (по твоему времени)
                 if current_hour == rt["start_remind"] and rt["start_minute"] <= current_minute <= rt["start_minute"] + 20:
                     
-                    # --- ПЕРЕВОДИМ ВРЕМЯ АДМИНА В UTC (ДЛЯ ПОИСКА В БД) ---
-                    # Админ 12:30 → UTC 07:30 (вычитаем 5 часов)
-                    utc_hour = (rt["hour"] - 5) % 24
+                    # --- ПЕРЕВОДИМ ТВОЁ ВРЕМЯ В UTC (ДЛЯ ПОИСКА В БД) ---
+                    # Твоё 17:30 → UTC 15:30 (вычитаем 2 часа)
+                    utc_hour = (rt["hour"] - 2) % 24
                     utc_minute = rt["minute"]
                     
-                    # Проверяем, есть ли уже мем на это время сегодня (в БД время в UTC)
+                    # Проверяем, есть ли уже мем на это время сегодня
                     existing = get_today_memes_by_time(MEME_ADMIN_ID, utc_hour, utc_minute)
                     
                     if not existing:
