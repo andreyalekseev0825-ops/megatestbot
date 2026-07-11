@@ -249,9 +249,9 @@ def reminder_loop():
             # Например: 12:30 по админу → 07:30 UTC
             # Но в БД хранится UTC, поэтому ищем по UTC
             reminder_times = [
-                {"hour": 14, "minute": 30, "start_remind": 15, "start_minute": 40},
-                {"hour": 15, "minute": 30, "start_remind": 13, "start_minute": 5},
-                {"hour": 16, "minute": 30, "start_remind": 14, "start_minute": 5},
+                {"hour": 14, "minute": 30, "start_remind": 19, "start_minute": 5},
+                {"hour": 15, "minute": 30, "start_remind": 20, "start_minute": 5},
+                {"hour": 16, "minute": 30, "start_remind": 21, "start_minute": 5},
             ]
             
             for rt in reminder_times:
