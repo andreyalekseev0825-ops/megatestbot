@@ -1194,6 +1194,7 @@ async def testrem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ НАЙДЕНО {len(existing)} МЕМОВ! Напоминалка НЕ должна прийти.")
     else:
         await update.message.reply_text("❌ МЕМОВ НЕ НАЙДЕНО. Напоминалка ПРИДЁТ.")
+        
 # --- ЗАПУСК ---
 def main():
     init_db()
