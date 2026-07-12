@@ -1226,6 +1226,7 @@ def main():
     app.add_handler(CommandHandler("backup", backup_command))
     app.add_handler(CommandHandler("basequiz", base_quiz_command))
     app.add_handler(CommandHandler("backupbase", backup_base_command))
+    app.add_handler(CommandHandler("testrem", test_reminder))
     
       # --- МЕДИА (фото и видео) - ТОЛЬКО ОДИН! ---
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
@@ -1234,7 +1235,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(CommandHandler("showmemes", show_memes))
-    app.add_handler(CommandHandler("testrem", test_reminder))
+  
     
     print("🤖 Бот запущен!")
     app.run_polling()
