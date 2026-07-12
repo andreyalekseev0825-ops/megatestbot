@@ -254,7 +254,7 @@ def reminder_loop():
             
             # --- НАПОМИНАЛКИ (ПО ТВОЕМУ ВРЕМЕНИ UTC+2) ---
             reminder_times = [
-                {"hour": 18, "minute": 30, "start_remind": 18, "start_minute": 10},  # 17:30 по твоему времени
+                {"hour": 18, "minute": 30, "start_remind": 18, "start_minute": 20},  # 17:30 по твоему времени
                 {"hour": 23, "minute": 30, "start_remind": 23, "start_minute": 15},  # 18:30 по твоему времени
                 # 19:30 по твоему времени
             ]
@@ -265,7 +265,7 @@ def reminder_loop():
                     
                     # --- ПЕРЕВОДИМ ТВОЁ ВРЕМЯ В UTC (ДЛЯ ПОИСКА В БД) ---
                     # Твоё 17:30 → UTC 15:30 (вычитаем 2 часа)
-                    utc_hour = (rt["hour"] - 2) % 24
+                    utc_hour = (rt["hour"] - 3) % 24
                     utc_minute = rt["minute"]
                     
                     # Проверяем, есть ли уже мем на это время сегодня
@@ -387,7 +387,7 @@ def parse_datetime(text):
                 dt = dt + timedelta(days=1)
             else:
                 dt = dt.replace(year=now.year + 1)
-        dt = dt - timedelta(hours=2)
+        dt = dt - timedelta(hours=3)
         return dt
     
     # --- ДАТА + ВРЕМЯ С ГОДОМ (08.07.2026 20:33) ---
@@ -395,7 +395,7 @@ def parse_datetime(text):
     if match:
         day, month, year, hour, minute = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
         dt = datetime(year, month, day, hour, minute)
-        dt = dt - timedelta(hours=2)
+        dt = dt - timedelta(hours=3)
         return dt
     
     return None
