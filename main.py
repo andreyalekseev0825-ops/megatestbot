@@ -1184,8 +1184,8 @@ async def show_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def testrem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Проверяет, видит ли бот мемы на 15:30 UTC"""
-    hour = 15
-    minute = 30
+    hour = 17
+    minute = 40
     await update.message.reply_text(f"🔍 Проверяю мемы на {hour:02d}:{minute:02d} UTC...")
     
     existing = get_today_memes_by_time(MEME_ADMIN_ID, hour, minute)
