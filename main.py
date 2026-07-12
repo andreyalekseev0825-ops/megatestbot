@@ -194,23 +194,17 @@ def delete_user_memes(chat_id, meme_id=None):
 
 # --- НАПОМИНАЛКА ---
 def get_today_memes_by_time(chat_id, target_hour, target_minute):
-    """Проверяет, запланирован ли мем на конкретное время сегодня (МСК)"""
+    """Проверяет, запланирован ли мем на конкретное время сегодня (UTC)"""
     conn = sqlite3.connect(QUIZZES_DB)
     c = conn.cursor()
     
-    # Получаем сегодняшнюю дату в UTC (для поиска в БД)
-    now_utc = datetime.now() - timedelta(hours=2)
+    # Ищем по UTC (без сдвигов)
+    now_utc = datetime.now()
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     today_end = now_utc.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
 
     print(f"🔍 ИЩУ В БД: chat_id={chat_id}, time={target_hour:02d}:{target_minute:02d} UTC")
     print(f"📅 today_start={today_start}, today_end={today_end}")
-
-    
-    # Целевое время в UTC (МСК - 3 часа)
-    # target_utc_hour = target_hour - 2
-    # if target_utc_hour < 0:
-        # target_utc_hour += 24
     
     c.execute('''
         SELECT id FROM memes 
@@ -218,7 +212,7 @@ def get_today_memes_by_time(chat_id, target_hour, target_minute):
         AND publish_time >= ? 
         AND publish_time <= ?
         AND publish_time LIKE ?
-    ''', (chat_id, today_start, today_end, f'%{target_utc_hour:02d}:{target_minute:02d}%'))
+    ''', (chat_id, today_start, today_end, f'%{target_hour:02d}:{target_minute:02d}%'))
     rows = c.fetchall()
     conn.close()
     return rows
@@ -254,7 +248,7 @@ def reminder_loop():
             
             # --- НАПОМИНАЛКИ (ПО ТВОЕМУ ВРЕМЕНИ UTC+2) ---
             reminder_times = [
-                {"hour": 17, "minute": 30, "start_remind": 20, "start_minute": 5},  # 17:30 по твоему времени
+                {"hour": 20, "minute": 50, "start_remind": 20, "start_minute": 35},  # 17:30 по твоему времени
                 {"hour": 23, "minute": 30, "start_remind": 23, "start_minute": 15},  # 18:30 по твоему времени
                 # 19:30 по твоему времени
             ]
@@ -265,7 +259,7 @@ def reminder_loop():
                     
                     # --- ПЕРЕВОДИМ ТВОЁ ВРЕМЯ В UTC (ДЛЯ ПОИСКА В БД) ---
                     # Твоё 17:30 → UTC 15:30 (вычитаем 2 часа)
-                    utc_hour = (rt["hour"] - 3) % 24
+                    utc_hour = (rt["hour"] - 2) % 24
                     utc_minute = rt["minute"]
                     
                     # Проверяем, есть ли уже мем на это время сегодня
