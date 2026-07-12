@@ -1184,9 +1184,9 @@ async def show_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Принудительно проверяет, есть ли мем на указанное время"""
-    await update.message.reply_text("🔍 Проверяю мемы на 13:30 UTC (16:30 МСК)...")
+    await update.message.reply_text("🔍 Проверяю мемы на 14:40 UTC (17:40 МСК)...")
     
-    existing = get_today_memes_by_time(MEME_ADMIN_ID, 13, 30)
+    existing = get_today_memes_by_time(MEME_ADMIN_ID, 14, 40)
     
     if existing:
         await update.message.reply_text(f"✅ НАЙДЕНО {len(existing)} МЕМОВ!")
