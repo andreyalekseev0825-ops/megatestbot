@@ -1226,7 +1226,7 @@ def main():
     app.add_handler(CommandHandler("backup", backup_command))
     app.add_handler(CommandHandler("basequiz", base_quiz_command))
     app.add_handler(CommandHandler("backupbase", backup_base_command))
-    app.add_handler(CommandHandler("testrem", test_reminder))
+    app.add_handler(CommandHandler("testrem", testrem))
     
       # --- МЕДИА (фото и видео) - ТОЛЬКО ОДИН! ---
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
