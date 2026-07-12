@@ -1182,6 +1182,17 @@ async def show_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(reply)
 
+async def test_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принудительно проверяет, есть ли мем на указанное время"""
+    await update.message.reply_text("🔍 Проверяю мемы на 13:30 UTC (16:30 МСК)...")
+    
+    existing = get_today_memes_by_time(MEME_ADMIN_ID, 13, 30)
+    
+    if existing:
+        await update.message.reply_text(f"✅ НАЙДЕНО {len(existing)} МЕМОВ!")
+    else:
+        await update.message.reply_text("❌ МЕМОВ НЕ НАЙДЕНО")
+
 # --- ЗАПУСК ---
 def main():
     init_db()
@@ -1221,6 +1232,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(CommandHandler("showmemes", show_memes))
+    app.add_handler(CommandHandler("testrem", test_reminder))
     
     print("🤖 Бот запущен!")
     app.run_polling()
