@@ -245,6 +245,9 @@ def reminder_loop():
             current_hour = now_user.hour
             current_minute = now_user.minute
             today_str = now_user.strftime('%Y-%m-%d')
+
+              # --- ОТЛАДКА: ВСЁ ПИШЕТ В ЛОГИ ---
+            print(f"🔄 Проверка: {current_hour:02d}:{current_minute:02d}")
             
             # --- НАПОМИНАЛКИ (ПО ТВОЕМУ ВРЕМЕНИ UTC+2) ---
             reminder_times = [
