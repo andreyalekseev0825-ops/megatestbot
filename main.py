@@ -203,6 +203,9 @@ def get_today_memes_by_time(chat_id, target_hour, target_minute):
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     today_end = now_utc.replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
 
+    print(f"🔍 ИЩУ В БД: chat_id={chat_id}, time={target_hour:02d}:{target_minute:02d} UTC")
+    print(f"📅 today_start={today_start}, today_end={today_end}")
+
     
     # Целевое время в UTC (МСК - 3 часа)
     target_utc_hour = target_hour - 2
@@ -710,6 +713,7 @@ async def handle_meme_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hashtag = context.user_data.get('meme_hashtag', '#мемло')
     post_text = context.user_data.get('meme_post_text')
     save_meme(chat_id, username, file_id, file_type, hashtag, post_text, dt)
+    print(f"✅ МЕМ СОХРАНЁН В БД: {dt.isoformat()}, chat_id: {chat_id}")
     msk_time = (dt + timedelta(hours=2)).strftime('%d.%m.%Y в %H:%M')
     delay = int((dt - now).total_seconds())
     await update.message.reply_text(
