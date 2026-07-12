@@ -372,7 +372,7 @@ def parse_datetime(text):
         dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if dt < now:
             dt = dt + timedelta(days=1)
-        dt = dt - timedelta(hours=2)
+        dt = dt - timedelta(hours=3)
         return dt
     
     # --- ДАТА + ВРЕМЯ (08.07 20:33) ---
