@@ -1161,6 +1161,27 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Если ничего не ждём
     await update.message.reply_text("❌ Я не жду медиа. Используй /quiz или /meme чтобы начать.")
 
+async def show_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает все мемы в БД"""
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('SELECT id, chat_id, publish_time, hashtag FROM memes ORDER BY id DESC LIMIT 10')
+    rows = c.fetchall()
+    conn.close()
+    
+    if not rows:
+        await update.message.reply_text("📭 В БД нет мемов.")
+        return
+    
+    reply = "📋 **Последние 10 мемов в БД:**\n\n"
+    for row in rows:
+        reply += f"🆔 {row[0]}\n"
+        reply += f"📅 {row[2]}\n"
+        reply += f"🏷️ {row[3]}\n"
+        reply += f"👤 {row[1]}\n\n"
+    
+    await update.message.reply_text(reply)
+
 # --- ЗАПУСК ---
 def main():
     init_db()
@@ -1199,6 +1220,7 @@ def main():
     # --- ТЕКСТ (только ОДИН!) ---
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_callback))
+    app.add_handler(CommandHandler("showmemes", show_memes))
     
     print("🤖 Бот запущен!")
     app.run_polling()
