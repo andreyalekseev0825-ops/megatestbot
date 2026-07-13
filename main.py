@@ -12,12 +12,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 # --- КОНФИГИ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = "@tryaslos"
+CHANNEL_ID = "@trassa993"
 SUGGESTION_LINK = "https://t.me/trassa993?direct"
 QUIZZES_DB = 'quizzes.db'
 BASE_QUIZZES_DB = 'basequizzes.db'
 # --- ID ПОЛЬЗОВАТЕЛЯ ДЛЯ НАПОМИНАНИЙ ---
-MEME_ADMIN_ID = "5206039766"  # ЗАМЕНИ НА РЕАЛЬНЫЙ CHAT_ID
+MEME_ADMIN_ID = "6607609864"  # ЗАМЕНИ НА РЕАЛЬНЫЙ CHAT_ID
 
 HASHTAGS = [
     "#Новое_поколение", "#Игра_бога", "#Идеальный_мир", "#Голос_времени",
@@ -248,7 +248,7 @@ def reminder_loop():
             
             # --- НАПОМИНАЛКИ (ПО ТВОЕМУ ВРЕМЕНИ UTC+2) ---
             reminder_times = [
-                {"hour": 10, "minute": 30, "start_remind": 10, "start_minute": 5},  # 17:30 по твоему времени
+                {"hour": 16, "minute": 30, "start_remind": 16, "start_minute": 5},  # 17:30 по твоему времени
                 {"hour": 17, "minute": 30, "start_remind": 17, "start_minute": 5}, 
                 {"hour": 18, "minute": 30, "start_remind": 18, "start_minute": 5}, # 18:30 по твоему времени
                 # 19:30 по твоему времени
@@ -480,7 +480,7 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for idx, (quiz_id, question, publish_time) in enumerate(scheduled, 1):
         dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
         reply += f"{idx}. {question[:40]}... → {dt.strftime('%d.%m %H:%M')}\n"
-        reply += f"   🆔 {quiz_id} | /cancel_{quiz_id}\n\n"
+        reply += f"   🆔 {quiz_id} | /cancel {quiz_id}\n\n"
     await update.message.reply_text(reply)
 
 async def cancel_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -730,7 +730,7 @@ async def my_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for idx, (meme_id, file_type, hashtag, publish_time) in enumerate(memes, 1):
         dt = datetime.fromisoformat(publish_time) + timedelta(hours=3)
         reply += f"{idx}. {file_type} | {hashtag} → {dt.strftime('%d.%m %H:%M')}\n"
-        reply += f"   🆔 {meme_id} | /cancelmeme_{meme_id}\n\n"
+        reply += f"   🆔 {meme_id} | /cancelmeme {meme_id}\n\n"
     await update.message.reply_text(reply)
 
 async def cancel_meme(update: Update, context: ContextTypes.DEFAULT_TYPE):
