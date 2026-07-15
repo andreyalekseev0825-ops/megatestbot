@@ -592,42 +592,22 @@ async def handle_meme_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     context.user_data['meme_file_id'] = file_id
     context.user_data['meme_file_type'] = file_type
-    context.user_data['step'] = 'waiting_for_meme_text'
+    context.user_data['step'] = 'waiting_for_meme_hashtag'  # <-- ШАГ НА ВЫБОР ХЭШТЕГА
     
     keyboard = [
-        [InlineKeyboardButton("✅ Добавить текст", callback_data="meme_text_yes")],
-        [InlineKeyboardButton("⏭️ Без текста", callback_data="meme_text_no")]
+        [InlineKeyboardButton("#мемло", callback_data="meme_h_memlo")],
+        [InlineKeyboardButton("#ФлудНаПМ", callback_data="meme_h_flud")],
+        [InlineKeyboardButton("#линчфд", callback_data="meme_h_newgen")],
+        [InlineKeyboardButton("#неошафд", callback_data="meme_h_neosha")],
+        [InlineKeyboardButton("#МШфд", callback_data="meme_h_mineshield")],
+        [InlineKeyboardButton("✏️ Свой", callback_data="meme_h_custom")],
     ]
     
     await update.message.reply_text(
-        "📝 Добавить текст к мему?",
+        "🏷️ Выбери хэштег для мема:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def meme_hashtag_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    data = query.data
-    
-    if data == "meme_hashtag_add":
-        context.user_data['meme_hashtag'] = "#ФлудНаПМ"
-        await query.edit_message_text("✅ Хэштег добавлен!")
-    else:
-        context.user_data['meme_hashtag'] = "#мемло"
-        await query.edit_message_text("⏭️ Хэштег пропущен, будет только #мемло")
-    
-    context.user_data['step'] = 'waiting_for_meme_action'
-    
-    keyboard = [
-        [InlineKeyboardButton("✅ Опубликовать сейчас", callback_data="meme_publish_now")],
-        [InlineKeyboardButton("⏰ Запланировать на время", callback_data="meme_schedule")],
-        [InlineKeyboardButton("❌ Отмена", callback_data="meme_cancel")]
-    ]
-    
-    await query.message.reply_text(
-        "Что делаем с мемом?",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
 
 async def meme_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -845,6 +825,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step == 'waiting_for_meme_time':
         await handle_meme_time(update, context)
         return
+
+    # --- СВОЙ ХЭШТЕГ ДЛЯ МЕМА ---
+if step == 'waiting_for_meme_custom_hashtag':
+    text = text.strip()
+    if not text.startswith('#'):
+        text = '#' + text
+    context.user_data['meme_hashtag'] = text
+    context.user_data['step'] = 'waiting_for_meme_text'
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Добавить текст", callback_data="meme_text_yes")],
+        [InlineKeyboardButton("⏭️ Без текста", callback_data="meme_text_no")]
+    ]
+    
+    await update.message.reply_text(
+        f"✅ Хэштег: {text}\n\n📝 Добавить текст к мему?",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return
     
     # --- ТЕКСТ ВИКТОРИНЫ ---
     if step == 'waiting_for_quiz_text':
@@ -936,10 +935,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     print(f"🔘 Нажата кнопка: {data}")
     
-    # --- ХЭШТЕГИ ДЛЯ МЕМА ---
-    if data in ["meme_hashtag_add", "meme_hashtag_skip"]:
-        await meme_hashtag_callback(update, context)
-        return
     
     # --- КНОПКИ МЕМА ---
     if data in ["meme_publish_now", "meme_schedule", "meme_cancel"]:
@@ -964,6 +959,39 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "После картинки выбери действие."
         )
         return
+
+    # --- ВЫБОР ХЭШТЕГА ДЛЯ МЕМА ---
+   if data.startswith("meme_h_"):
+       hashtag = data.replace("meme_h_", "")
+    
+       if hashtag == "custom":
+           context.user_data['step'] = 'waiting_for_meme_custom_hashtag'
+           await query.edit_message_text("✏️ Напиши свой хэштег (например, #МойХэштег)")
+           return
+    
+    # Сохраняем выбранный хэштег
+       if hashtag == "memlo":
+           context.user_data['meme_hashtag'] = "#мемло"
+       elif hashtag == "flud":
+           context.user_data['meme_hashtag'] = "#ФлудНаПМ"
+       elif hashtag == "newgen":
+           context.user_data['meme_hashtag'] = "#линчфд"
+       else:
+           context.user_data['meme_hashtag'] = "#" + hashtag
+    
+       await query.edit_message_text(f"✅ Хэштег: {context.user_data['meme_hashtag']}")
+    
+    # Дальше спрашиваем про текст
+       context.user_data['step'] = 'waiting_for_meme_text'
+       keyboard = [
+           [InlineKeyboardButton("✅ Добавить текст", callback_data="meme_text_yes")],
+           [InlineKeyboardButton("⏭️ Без текста", callback_data="meme_text_no")]
+       ]
+       await query.message.reply_text(
+           "📝 Добавить текст к мему?",
+           reply_markup=InlineKeyboardMarkup(keyboard)
+       )
+       return
     
     # --- ТЕКСТ ДЛЯ МЕМА ---
     # --- ТЕКСТ ДЛЯ МЕМА ---
