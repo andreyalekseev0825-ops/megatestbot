@@ -972,9 +972,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Сохраняем основной хэштег
         hashtag_map = {
             "memlo": "#мемло",
-            "newgen": "#Новое_поколение",
-            "igra": "#Игра_бога",
-            "ideal": "#Идеальный_мир",
+            "newgen": "#линчфд",
+            "igra": "#МШфд",
+            "ideal": "#неошафд",
         }
         context.user_data['meme_hashtag'] = hashtag_map.get(hashtag, "#" + hashtag)
     
