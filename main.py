@@ -1475,6 +1475,136 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Если ничего не ждём
     await update.message.reply_text("📄 Файл получен. Используй /restorebase чтобы восстановить базу.")
 
+async def import_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /import_quizzes — загрузить бэкап и импортировать вопросы в base_quizzes"""
+    
+    # Проверяем, есть ли файл
+    if not update.message.document:
+        await update.message.reply_text(
+            "❌ Отправь файл quizzes_backup_*.db командой /import_quizzes"
+        )
+        return
+    
+    document = update.message.document
+    if not document.file_name.endswith('.db'):
+        await update.message.reply_text("❌ Файл должен иметь расширение .db")
+        return
+    
+    await update.message.reply_text("📥 Загружаю файл...")
+    
+    try:
+        # Скачиваем файл
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"import_temp_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        await file.download_to_drive(file_path)
+        
+        await update.message.reply_text("🔍 Ищу вопросы в файле...")
+        
+        # Подключаемся к загруженной базе
+        conn_import = sqlite3.connect(file_path)
+        c_import = conn_import.cursor()
+        
+        # Проверяем, есть ли таблицы
+        tables = []
+        c_import.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('scheduled', 'quizzes')")
+        tables = [row[0] for row in c_import.fetchall()]
+        
+        if not tables:
+            await update.message.reply_text("❌ В файле нет таблиц scheduled или quizzes")
+            conn_import.close()
+            os.remove(file_path)
+            return
+        
+        # Подключаемся к основной базе
+        conn_main = sqlite3.connect(BASE_QUIZZES_DB)
+        c_main = conn_main.cursor()
+        
+        # Получаем существующие вопросы (чтобы не было дубликатов)
+        c_main.execute('SELECT question FROM base_quizzes')
+        existing_questions = {row[0] for row in c_main.fetchall()}
+        
+        imported_count = 0
+        skipped_count = 0
+        
+        # Импортируем из scheduled
+        if 'scheduled' in tables:
+            c_import.execute('SELECT question, options, correct_option_id FROM scheduled')
+            for row in c_import.fetchall():
+                question, options, correct_option_id = row
+                if question not in existing_questions:
+                    c_main.execute('''
+                        INSERT INTO base_quizzes (question, options, correct_option_id, date)
+                        VALUES (?, ?, ?, ?)
+                    ''', (question, options, correct_option_id, datetime.now().isoformat()))
+                    imported_count += 1
+                    existing_questions.add(question)
+                else:
+                    skipped_count += 1
+        
+        # Импортируем из quizzes (история)
+        if 'quizzes' in tables:
+            c_import.execute('SELECT question, options, correct_option_id FROM quizzes')
+            for row in c_import.fetchall():
+                question, options, correct_option_id = row
+                if question not in existing_questions:
+                    c_main.execute('''
+                        INSERT INTO base_quizzes (question, options, correct_option_id, date)
+                        VALUES (?, ?, ?, ?)
+                    ''', (question, options, correct_option_id, datetime.now().isoformat()))
+                    imported_count += 1
+                    existing_questions.add(question)
+                else:
+                    skipped_count += 1
+        
+        conn_main.commit()
+        conn_main.close()
+        conn_import.close()
+        
+        # Удаляем временный файл
+        os.remove(file_path)
+        
+        # Проверяем итоговое количество
+        conn = sqlite3.connect(BASE_QUIZZES_DB)
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) FROM base_quizzes')
+        total = c.fetchone()[0]
+        conn.close()
+        
+        await update.message.reply_text(
+            f"✅ Импорт завершён!\n\n"
+            f"📥 Импортировано новых вопросов: {imported_count}\n"
+            f"⏭️ Пропущено дубликатов: {skipped_count}\n"
+            f"📊 Всего вопросов в базе: {total}\n\n"
+            "Теперь эти вопросы доступны в /quizgame!"
+        )
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+async def reset_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сбрасывает счётчик викторин на сегодня (для тестирования)"""
+    chat_id = str(update.effective_user.id)
+    
+    # Проверяем, есть ли запись
+    stats = get_user_stats(chat_id)
+    if stats["last_play_date"] == datetime.now().date().isoformat():
+        # Если сегодня уже играл — сбрасываем
+        update_user_stats(chat_id, stats["score"], 0, datetime.now().date().isoformat())
+        await update.message.reply_text(
+            f"🔄 Счётчик сброшен!\n\n"
+            f"📊 Твоя статистика:\n"
+            f"🏆 Баллы: {stats['score']}\n"
+            f"🎮 Попыток сегодня: 0/5"
+        )
+    else:
+        await update.message.reply_text(
+            f"📊 Ты ещё не играл сегодня.\n"
+            f"🎮 Доступно: 5/5 попыток\n"
+            f"🏆 Баллы: {stats['score']}"
+        )
+
 
         
 # --- ЗАПУСК ---
@@ -1514,6 +1644,8 @@ def main():
     app.add_handler(PollAnswerHandler(handle_poll_answer))
     app.add_handler(CommandHandler("restorebase", restore_base_command))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    app.add_handler(CommandHandler("import_quizzes", import_quizzes_command))
+    app.add_handler(CommandHandler("reset_quiz", reset_quiz))
     
       # --- МЕДИА (фото и видео) - ТОЛЬКО ОДИН! ---
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
