@@ -1386,6 +1386,10 @@ async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def restore_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /restorebase — загрузить бэкап базы вопросов"""
+
+     # --- ПРИНУДИТЕЛЬНЫЙ ОТВЕТ ДЛЯ ОТЛАДКИ ---
+    print("🔥 restore_base_command вызвана!")
+    await update.message.reply_text("🔥 Команда /restorebase получена!")
     
     # Проверяем, есть ли в сообщении документ
     if not update.message.document:
@@ -1458,6 +1462,18 @@ async def restore_base_command(update: Update, context: ContextTypes.DEFAULT_TYP
         if os.path.exists(file_path):
             os.remove(file_path)
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает загруженные документы (файлы)"""
+    document = update.message.document
+    
+    # Проверяем, есть ли в контексте ожидание восстановления
+    if context.user_data.get('waiting_for_restore'):
+        await restore_base_command(update, context)
+        return
+    
+    # Если ничего не ждём
+    await update.message.reply_text("📄 Файл получен. Используй /restorebase чтобы восстановить базу.")
+
 
         
 # --- ЗАПУСК ---
@@ -1496,6 +1512,7 @@ def main():
     app.add_handler(CommandHandler("quizstats", quiz_stats))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
     app.add_handler(CommandHandler("restorebase", restore_base_command))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     
       # --- МЕДИА (фото и видео) - ТОЛЬКО ОДИН! ---
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
