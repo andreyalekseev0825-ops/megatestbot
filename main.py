@@ -787,6 +787,30 @@ async def cancel_all_memes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     delete_user_memes(chat_id)
     await update.message.reply_text("✅ Все мемы отменены.")
 
+async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    poll_answer = update.poll_answer
+    chat_id = str(poll_answer.user.id)
+    
+    # Получаем вопрос из контекста
+    quiz_data = context.user_data.get('quiz_question')
+    if not quiz_data:
+        return
+    
+    # Проверяем ответ
+    if poll_answer.option_ids[0] == quiz_data['correct_option_id']:
+        stats = get_user_stats(chat_id)
+        stats["score"] += 1
+        update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
+        await context.bot.send_message(chat_id=chat_id, text="✅ Правильно! +1 балл")
+    else:
+        stats = get_user_stats(chat_id)
+        stats["score"] -= 1
+        update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
+        await context.bot.send_message(chat_id=chat_id, text="❌ Неправильно! –1 балл")
+    
+    # Удаляем вопрос из контекста
+    context.user_data.pop('quiz_question', None)
+
 # --- БЭКАПЫ ---
 async def backup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("💾 Создаю бэкап...")
@@ -1341,29 +1365,6 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats["today_plays"] += 1
     update_user_stats(chat_id, stats["score"], stats["today_plays"], today)
 
-async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    poll_answer = update.poll_answer
-    chat_id = str(poll_answer.user.id)
-    
-    # Получаем вопрос из контекста
-    quiz_data = context.user_data.get('quiz_question')
-    if not quiz_data:
-        return
-    
-    # Проверяем ответ
-    if poll_answer.option_ids[0] == quiz_data['correct_option_id']:
-        stats = get_user_stats(chat_id)
-        stats["score"] += 1
-        update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
-        await context.bot.send_message(chat_id=chat_id, text="✅ Правильно! +1 балл")
-    else:
-        stats = get_user_stats(chat_id)
-        stats["score"] -= 1
-        update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
-        await context.bot.send_message(chat_id=chat_id, text="❌ Неправильно! –1 балл")
-    
-    # Удаляем вопрос из контекста
-    context.user_data.pop('quiz_question', None)
 
 async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_user.id)
