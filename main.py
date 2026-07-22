@@ -1475,6 +1475,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_import'):
         await import_quizzes_command(update, context)
         return
+
+    if context.user_data.get('waiting_for_checkdb'):   # <-- ДОБАВЬ ЭТО
+        await check_db(update, context)
+        return
     
     # Если ничего не ждём
     await update.message.reply_text("📄 Файл получен. Используй /restorebase чтобы восстановить базу.")
