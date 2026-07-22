@@ -1472,7 +1472,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await restore_base_command(update, context)
         return
 
-     if context.user_data.get('waiting_for_import'):
+    if context.user_data.get('waiting_for_import'):
         await import_quizzes_command(update, context)
         return
     
