@@ -1384,6 +1384,80 @@ async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📅 Обновлено: {stats['last_play_date'] if stats['last_play_date'] else '—'}"
     )
 
+async def restore_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /restorebase — загрузить бэкап базы вопросов"""
+    
+    # Проверяем, есть ли в сообщении документ
+    if not update.message.document:
+        await update.message.reply_text(
+            "❌ Отправь файл базы данных (.db) командой /restorebase\n\n"
+            "Пример: отправь файл base_quizzes_backup_20260101_120000.db"
+        )
+        return
+    
+    document = update.message.document
+    
+    # Проверяем расширение
+    if not document.file_name.endswith('.db'):
+        await update.message.reply_text("❌ Файл должен иметь расширение .db")
+        return
+    
+    # Проверяем размер (максимум 50 МБ)
+    if document.file_size > 50 * 1024 * 1024:
+        await update.message.reply_text("❌ Файл слишком большой (максимум 50 МБ)")
+        return
+    
+    await update.message.reply_text("📥 Загружаю файл базы вопросов...")
+    
+    try:
+        # Скачиваем файл
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"restore_base_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        await file.download_to_drive(file_path)
+        
+        await update.message.reply_text("🔄 Восстанавливаю базу вопросов...")
+        
+        # Проверяем, что файл — это SQLite база
+        try:
+            conn = sqlite3.connect(file_path)
+            c = conn.cursor()
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='base_quizzes'")
+            if not c.fetchone():
+                await update.message.reply_text("❌ Файл не содержит таблицу base_quizzes")
+                os.remove(file_path)
+                return
+            conn.close()
+        except:
+            await update.message.reply_text("❌ Файл повреждён или это не SQLite база")
+            os.remove(file_path)
+            return
+        
+        # Останавливаем бота на секунду, чтобы закрыть соединения
+        # Просто заменяем файл
+        shutil.copy2(file_path, BASE_QUIZZES_DB)
+        
+        # Удаляем временный файл
+        os.remove(file_path)
+        
+        # Проверяем, сколько записей загружено
+        conn = sqlite3.connect(BASE_QUIZZES_DB)
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) FROM base_quizzes')
+        count = c.fetchone()[0]
+        conn.close()
+        
+        await update.message.reply_text(
+            f"✅ База вопросов успешно восстановлена!\n\n"
+            f"📊 Загружено вопросов: {count}\n"
+            f"📁 Файл: {document.file_name}\n\n"
+            "Теперь можно использовать /basequiz для добавления новых вопросов."
+        )
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при восстановлении: {e}")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
 
         
 # --- ЗАПУСК ---
@@ -1421,6 +1495,7 @@ def main():
     app.add_handler(CommandHandler("quizgame", quiz_game))
     app.add_handler(CommandHandler("quizstats", quiz_stats))
     app.add_handler(PollAnswerHandler(handle_poll_answer))
+    app.add_handler(CommandHandler("restorebase", restore_base_command))
     
       # --- МЕДИА (фото и видео) - ТОЛЬКО ОДИН! ---
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
