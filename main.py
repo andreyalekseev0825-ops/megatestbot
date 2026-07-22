@@ -67,11 +67,8 @@ def init_db():
             publish_time TEXT
         )
     ''')
-    conn.commit()
-    conn.close()
-    print("✅ База данных готова")
     
-    # --- НОВАЯ ТАБЛИЦА ДЛЯ СТАТИСТИКИ ---
+    # --- НОВАЯ ТАБЛИЦА ДЛЯ СТАТИСТИКИ (перенеси СЮДА!) ---
     c.execute('''
         CREATE TABLE IF NOT EXISTS quiz_stats (
             chat_id TEXT PRIMARY KEY,
@@ -80,8 +77,10 @@ def init_db():
             last_play_date TEXT
         )
     ''')
+    
     conn.commit()
     conn.close()
+    print("✅ База данных готова")
 
 
 
