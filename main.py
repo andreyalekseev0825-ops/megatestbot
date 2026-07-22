@@ -1388,6 +1388,7 @@ async def restore_base_command(update: Update, context: ContextTypes.DEFAULT_TYP
     """Команда /restorebase — загрузить бэкап базы вопросов"""
 
      # --- ПРИНУДИТЕЛЬНЫЙ ОТВЕТ ДЛЯ ОТЛАДКИ ---
+    context.user_data['waiting_for_restore'] = True
     print("🔥 restore_base_command вызвана!")
     await update.message.reply_text("🔥 Команда /restorebase получена!")
     
