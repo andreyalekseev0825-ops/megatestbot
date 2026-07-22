@@ -1614,6 +1614,57 @@ async def reset_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏆 Баллы: {stats['score']}"
         )
 
+async def check_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверяет структуру загруженной базы"""
+    if not update.message.document:
+        await update.message.reply_text("❌ Отправь файл .db")
+        return
+    
+    document = update.message.document
+    if not document.file_name.endswith('.db'):
+        await update.message.reply_text("❌ Файл должен иметь расширение .db")
+        return
+    
+    await update.message.reply_text("📥 Проверяю файл...")
+    
+    try:
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"check_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        await file.download_to_drive(file_path)
+        
+        conn = sqlite3.connect(file_path)
+        c = conn.cursor()
+        
+        # Получаем все таблицы
+        c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in c.fetchall()]
+        
+        reply = f"📋 **Таблицы в файле:**\n"
+        for t in tables:
+            reply += f"• {t}\n"
+        
+        # Проверяем структуру scheduled и quizzes
+        for table in ['scheduled', 'quizzes']:
+            if table in tables:
+                c.execute(f"PRAGMA table_info({table})")
+                columns = [row[1] for row in c.fetchall()]
+                reply += f"\n📌 **{table}:** колонки: {', '.join(columns)}\n"
+                
+                # Считаем записи
+                c.execute(f"SELECT COUNT(*) FROM {table}")
+                count = c.fetchone()[0]
+                reply += f"   Записей: {count}\n"
+        
+        conn.close()
+        os.remove(file_path)
+        
+        await update.message.reply_text(reply)
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка: {e}")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
 
         
 # --- ЗАПУСК ---
@@ -1655,6 +1706,7 @@ def main():
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(CommandHandler("import_quizzes", import_quizzes_command))
     app.add_handler(CommandHandler("reset_quiz", reset_quiz))
+    app.add_handler(CommandHandler("checkdb", check_db))
     
       # --- МЕДИА (фото и видео) - ТОЛЬКО ОДИН! ---
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
