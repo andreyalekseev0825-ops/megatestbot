@@ -1471,12 +1471,21 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('waiting_for_restore'):
         await restore_base_command(update, context)
         return
+
+     if context.user_data.get('waiting_for_import'):
+        await import_quizzes_command(update, context)
+        return
     
     # Если ничего не ждём
     await update.message.reply_text("📄 Файл получен. Используй /restorebase чтобы восстановить базу.")
 
 async def import_quizzes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /import_quizzes — загрузить бэкап и импортировать вопросы в base_quizzes"""
+
+    # --- УСТАНАВЛИВАЕМ ФЛАГ ---
+    context.user_data['waiting_for_import'] = True
+    await update.message.reply_text("🔥 Команда /import_quizzes получена! Отправь файл .db")
+
     
     # Проверяем, есть ли файл
     if not update.message.document:
