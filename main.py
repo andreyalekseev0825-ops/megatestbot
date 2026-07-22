@@ -1476,10 +1476,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await import_quizzes_command(update, context)
         return
 
-    if context.user_data.get('waiting_for_checkdb'):   # <-- ДОБАВЬ ЭТО
-        await check_db(update, context)
-        return
-    
     # Если ничего не ждём
     await update.message.reply_text("📄 Файл получен. Используй /restorebase чтобы восстановить базу.")
 
@@ -1620,8 +1616,13 @@ async def reset_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def check_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Проверяет структуру загруженной базы"""
+    
+    # Проверяем, есть ли файл в сообщении
     if not update.message.document:
-        await update.message.reply_text("❌ Отправь файл .db")
+        await update.message.reply_text(
+            "❌ Отправь файл .db командой /checkdb\n\n"
+            "Пример: /checkdb (с прикреплённым файлом)"
+        )
         return
     
     document = update.message.document
@@ -1643,7 +1644,7 @@ async def check_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
         c.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in c.fetchall()]
         
-        reply = f"📋 **Таблицы в файле:**\n"
+        reply = "📋 **Таблицы в файле:**\n"
         for t in tables:
             reply += f"• {t}\n"
         
