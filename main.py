@@ -70,6 +70,22 @@ def init_db():
     conn.commit()
     conn.close()
     print("✅ База данных готова")
+    
+    # --- НОВАЯ ТАБЛИЦА ДЛЯ СТАТИСТИКИ ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS quiz_stats (
+            chat_id TEXT PRIMARY KEY,
+            score INTEGER DEFAULT 0,
+            today_plays INTEGER DEFAULT 0,
+            last_play_date TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+
+
 
 # --- ФУНКЦИИ ДЛЯ ВИКТОРИН ---
 def save_scheduled(chat_id, username, question, options, correct_option_id, hashtag, file_id, publish_time):
@@ -455,6 +471,31 @@ def backup_quizzes():
         shutil.copy2(QUIZZES_DB, backup_name)
         return backup_name
     return None
+
+# --- ФУНКЦИИ ДЛЯ СТАТИСТИКИ КВИЗ-ИГРЫ ---
+def get_user_stats(chat_id):
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('SELECT score, today_plays, last_play_date FROM quiz_stats WHERE chat_id = ?', (chat_id,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return {"score": row[0], "today_plays": row[1], "last_play_date": row[2]}
+    return {"score": 0, "today_plays": 0, "last_play_date": None}
+
+def update_user_stats(chat_id, score, today_plays, last_play_date):
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        INSERT INTO quiz_stats (chat_id, score, today_plays, last_play_date)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            score = excluded.score,
+            today_plays = excluded.today_plays,
+            last_play_date = excluded.last_play_date
+    ''', (chat_id, score, today_plays, last_play_date))
+    conn.commit()
+    conn.close()
 
 # --- ОБРАБОТЧИКИ ВИКТОРИН ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1249,6 +1290,101 @@ async def testrem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ НАЙДЕНО {len(existing)} МЕМОВ! Напоминалка НЕ должна прийти.")
     else:
         await update.message.reply_text("❌ МЕМОВ НЕ НАЙДЕНО. Напоминалка ПРИДЁТ.")
+
+async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_user.id)
+    today = datetime.now().date().isoformat()
+    
+    stats = get_user_stats(chat_id)
+    
+    # Сброс счётчика, если новый день
+    if stats["last_play_date"] != today:
+        stats["today_plays"] = 0
+        stats["last_play_date"] = today
+        update_user_stats(chat_id, stats["score"], 0, today)
+    
+    # Проверка лимита
+    if stats["today_plays"] >= 5:
+        await update.message.reply_text("❌ Ты уже прошёл 5 викторин сегодня! Возвращайся завтра.")
+        return
+    
+    # Достаём случайный вопрос из базы
+    conn = sqlite3.connect(BASE_QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('SELECT question, options, correct_option_id FROM base_quizzes ORDER BY RANDOM() LIMIT 1')
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        await update.message.reply_text("📭 В базе пока нет вопросов. Добавь их через /basequiz")
+        return
+    
+    question, options_raw, correct_option_id = row
+    options = options_raw.split('|||') if options_raw else []
+    
+    # Сохраняем вопрос в контекст
+    context.user_data['quiz_question'] = {
+        "question": question,
+        "options": options,
+        "correct_option_id": correct_option_id
+    }
+    
+    # Отправляем опрос
+    await update.message.reply_poll(
+        question=question,
+        options=options,
+        type="quiz",
+        correct_option_id=correct_option_id,
+        is_anonymous=False
+    )
+    
+    # Увеличиваем счётчик попыток
+    stats["today_plays"] += 1
+    update_user_stats(chat_id, stats["score"], stats["today_plays"], today)
+
+async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    poll_answer = update.poll_answer
+    chat_id = str(poll_answer.user.id)
+    
+    # Получаем вопрос из контекста
+    quiz_data = context.user_data.get('quiz_question')
+    if not quiz_data:
+        return
+    
+    # Проверяем ответ
+    if poll_answer.option_ids[0] == quiz_data['correct_option_id']:
+        stats = get_user_stats(chat_id)
+        stats["score"] += 1
+        update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
+        await context.bot.send_message(chat_id=chat_id, text="✅ Правильно! +1 балл")
+    else:
+        stats = get_user_stats(chat_id)
+        stats["score"] -= 1
+        update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
+        await context.bot.send_message(chat_id=chat_id, text="❌ Неправильно! –1 балл")
+    
+    # Удаляем вопрос из контекста
+    context.user_data.pop('quiz_question', None)
+
+async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_user.id)
+    stats = get_user_stats(chat_id)
+    today = datetime.now().date().isoformat()
+    
+    # Проверяем, нужно ли обновить дату
+    if stats["last_play_date"] != today:
+        remaining = 5
+    else:
+        remaining = 5 - stats["today_plays"]
+    
+    await update.message.reply_text(
+        f"📊 **Твоя статистика:**\n"
+        f"🏆 Баллы: {stats['score']}\n"
+        f"🎮 Осталось попыток сегодня: {remaining}/5\n"
+        f"📅 Обновлено: {stats['last_play_date'] if stats['last_play_date'] else '—'}"
+    )
+
+
         
 # --- ЗАПУСК ---
 def main():
@@ -1282,6 +1418,9 @@ def main():
     app.add_handler(CommandHandler("basequiz", base_quiz_command))
     app.add_handler(CommandHandler("backupbase", backup_base_command))
     app.add_handler(CommandHandler("testrem", testrem))
+    app.add_handler(CommandHandler("quizgame", quiz_game))
+    app.add_handler(CommandHandler("quizstats", quiz_stats))
+    app.add_handler(PollAnswerHandler(handle_poll_answer))
     
       # --- МЕДИА (фото и видео) - ТОЛЬКО ОДИН! ---
     app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO, handle_media))
