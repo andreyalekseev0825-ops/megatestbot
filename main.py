@@ -103,6 +103,16 @@ def init_db():
         )
     ''')
 
+    # --- КАКИЕ ВОПРОСЫ ПОЛЬЗОВАТЕЛЬ УЖЕ ПРОХОДИЛ ---
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS user_questions (
+            chat_id TEXT,
+            question_id INTEGER,
+            date TEXT,
+            PRIMARY KEY (chat_id, question_id)
+        )
+    ''')
+
     conn.commit()
     conn.close()
     print("✅ База данных готова")
@@ -229,6 +239,39 @@ def delete_user_memes(chat_id, meme_id=None):
         c.execute('DELETE FROM memes WHERE chat_id = ? AND id = ?', (chat_id, meme_id))
     else:
         c.execute('DELETE FROM memes WHERE chat_id = ?', (chat_id,))
+    conn.commit()
+    conn.close()
+
+def mark_question_as_played(chat_id, question_id):
+    """Отмечает, что пользователь прошёл этот вопрос сегодня"""
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        INSERT OR REPLACE INTO user_questions (chat_id, question_id, date)
+        VALUES (?, ?, ?)
+    ''', (chat_id, question_id, datetime.now().date().isoformat()))
+    conn.commit()
+    conn.close()
+
+def get_played_question_ids(chat_id):
+    """Возвращает ID вопросов, которые пользователь уже проходил сегодня"""
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    today = datetime.now().date().isoformat()
+    c.execute('''
+        SELECT question_id FROM user_questions
+        WHERE chat_id = ? AND date = ?
+    ''', (chat_id, today))
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
+def clear_old_user_questions():
+    """Очищает записи старше 7 дней (чтобы база не раздувалась)"""
+    conn = sqlite3.connect(QUIZZES_DB)
+    c = conn.cursor()
+    week_ago = (datetime.now() - timedelta(days=7)).date().isoformat()
+    c.execute('DELETE FROM user_questions WHERE date < ?', (week_ago,))
     conn.commit()
     conn.close()
 
@@ -856,6 +899,9 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
         stats["score"] -= 1
         update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
         await context.bot.send_message(chat_id=chat_id, text="❌ Неправильно! –1 балл")
+        
+    # --- ОТМЕЧАЕМ ВОПРОС КАК ПРОЙДЕННЫЙ ---
+    mark_question_as_played(chat_id, quiz_data.get('question_id'))
     
     context.user_data.pop('quiz_question', None)
 
@@ -1368,36 +1414,45 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stats = get_user_stats(chat_id)
     
-    # Сброс счётчика
     if stats["last_play_date"] != today:
         stats["today_plays"] = 0
         stats["last_play_date"] = today
         update_user_stats(chat_id, stats["score"], 0, today)
     
-    # Проверка лимита
     if stats["today_plays"] >= 5:
         await update.message.reply_text("❌ Ты уже прошёл 5 викторин сегодня! Возвращайся завтра.")
         return
     
-    # Достаём случайный вопрос
+    # --- ПОЛУЧАЕМ ID ВОПРОСОВ, КОТОРЫЕ УЖЕ ПРОЙДЕНЫ ---
+    played_ids = get_played_question_ids(chat_id)
+    
     conn = sqlite3.connect(BASE_QUIZZES_DB)
     c = conn.cursor()
-    c.execute('SELECT question, options, correct_option_id, rarity FROM base_quizzes ORDER BY RANDOM() LIMIT 1')
+    
+    if played_ids:
+        placeholders = ','.join(['?'] * len(played_ids))
+        c.execute(f'''
+            SELECT id, question, options, correct_option_id, rarity FROM base_quizzes
+            WHERE id NOT IN ({placeholders})
+            ORDER BY RANDOM() LIMIT 1
+        ''', played_ids)
+    else:
+        c.execute('SELECT id, question, options, correct_option_id, rarity FROM base_quizzes ORDER BY RANDOM() LIMIT 1')
+    
     row = c.fetchone()
     conn.close()
     
     if not row:
-        await update.message.reply_text("📭 В базе пока нет вопросов. Добавь их через /basequiz")
+        await update.message.reply_text("📭 В базе нет новых вопросов! Ты уже прошёл все. Возвращайся завтра или добавь новые через /basequiz")
         return
     
-    question, options_raw, correct_option_id, rarity = row
+    question_id, question, options_raw, correct_option_id, rarity = row
     options = options_raw.split('|||') if options_raw else []
     
-    # Определяем награду
     reward = RARITY_REWARDS.get(rarity, 1)
     
-    # Сохраняем в контекст
     context.user_data['quiz_question'] = {
+        "question_id": question_id,
         "question": question,
         "options": options,
         "correct_option_id": correct_option_id,
@@ -1405,7 +1460,6 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "rarity": rarity
     }
     
-    # Отправляем опрос
     await update.message.reply_poll(
         question=f"{RARITY_EMOJIS.get(rarity, '')}\n\n{question}",
         options=options,
@@ -1414,7 +1468,6 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_anonymous=False
     )
     
-    # Увеличиваем счётчик попыток
     stats["today_plays"] += 1
     update_user_stats(chat_id, stats["score"], stats["today_plays"], today)
 
