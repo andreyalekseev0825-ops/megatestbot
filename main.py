@@ -1525,8 +1525,17 @@ async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rarity_counts = dict(c.fetchall())
     conn.close()
     
+    # --- ЧЕЛОВЕЧЕСКИЕ НАЗВАНИЯ ---
+    rarity_names = {
+        "common": "Обычный",
+        "uncommon": "Необычный",
+        "rare": "Редкий",
+        "epic": "Эпический",
+        "legendary": "Легендарный"
+    }
+    
     rarity_text = "\n".join([
-        f"{RARITY_EMOJI_ONLY.get(r, '')} {r}: {rarity_counts.get(r, 0)}" 
+        f"{RARITY_EMOJI_ONLY.get(r, '')} {rarity_names.get(r, r)}: {rarity_counts.get(r, 0)}" 
         for r in ["common", "uncommon", "rare", "epic", "legendary"]
     ])
     
@@ -1538,6 +1547,7 @@ async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📅 Обновлено: {stats['last_play_date'] if stats['last_play_date'] else '—'}\n\n"
         f"📚 **Вопросы в базе:**\n{rarity_text}"
     )
+    
 async def restore_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /restorebase — загрузить бэкап базы вопросов"""
 
