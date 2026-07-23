@@ -24,6 +24,30 @@ HASHTAGS = [
     "#Тринадцать_огней", "#Последняя_реальность", "#Сердце_вселенной",
     "#Точка_невозврата", "#Мастерская_47", "#внесезонов"
 ]
+# --- РЕДКОСТИ И НАГРАДЫ ---
+RARITY_REWARDS = {
+    "common": 1,
+    "uncommon": 2,
+    "rare": 3,
+    "epic": 5,
+    "legendary": 10
+}
+
+RARITY_EMOJIS = {
+    "common": "⬜ Обычный",
+    "uncommon": "🟩 Необычный",
+    "rare": "🟦 Редкий",
+    "epic": "🟪 Эпический",
+    "legendary": "🟧 Легендарный"
+}
+
+RARITY_EMOJI_ONLY = {
+    "common": "⬜",
+    "uncommon": "🟩",
+    "rare": "🟦",
+    "epic": "🟪",
+    "legendary": "🟧"
+}
 
 # --- БАЗА ДАННЫХ ---
 def init_db():
@@ -77,7 +101,7 @@ def init_db():
             last_play_date TEXT
         )
     ''')
-    
+
     conn.commit()
     conn.close()
     print("✅ База данных готова")
@@ -440,6 +464,7 @@ def init_base_db():
             question TEXT,
             options TEXT,
             correct_option_id INTEGER,
+            rarity TEXT DEFAULT 'common',
             date TEXT
         )
     ''')
@@ -448,14 +473,31 @@ def init_base_db():
     print("✅ База базовых вопросов готова")
 
 def save_base_quiz(question, options, correct_option_id):
+    # Определяем редкость
+    rarity_roll = random.random()
+    
+    if rarity_roll < 0.60:
+        rarity = "common"
+    elif rarity_roll < 0.85:
+        rarity = "uncommon"
+    elif rarity_roll < 0.95:
+        rarity = "rare"
+    elif rarity_roll < 0.99:
+        rarity = "epic"
+    else:
+        rarity = "legendary"
+    
     conn = sqlite3.connect(BASE_QUIZZES_DB)
     c = conn.cursor()
     c.execute('''
-        INSERT INTO base_quizzes (question, options, correct_option_id, date)
-        VALUES (?, ?, ?, ?)
-    ''', (question, options, correct_option_id, datetime.now().isoformat()))
+        INSERT INTO base_quizzes (question, options, correct_option_id, rarity, date)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (question, options, correct_option_id, rarity, datetime.now().isoformat()))
     conn.commit()
     conn.close()
+    
+    print(f"✅ Базовый вопрос сохранён: {question[:30]}... ({rarity})")
+    return rarity
 
 def backup_base_quizzes():
     if os.path.exists(BASE_QUIZZES_DB):
@@ -791,24 +833,29 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     poll_answer = update.poll_answer
     chat_id = str(poll_answer.user.id)
     
-    # Получаем вопрос из контекста
     quiz_data = context.user_data.get('quiz_question')
     if not quiz_data:
         return
     
-    # Проверяем ответ
+    reward = quiz_data.get('reward', 1)
+    rarity = quiz_data.get('rarity', 'common')
+    
     if poll_answer.option_ids[0] == quiz_data['correct_option_id']:
         stats = get_user_stats(chat_id)
-        stats["score"] += 1
+        stats["score"] += reward
         update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
-        await context.bot.send_message(chat_id=chat_id, text="✅ Правильно! +1 балл")
+        
+        emoji = RARITY_EMOJI_ONLY.get(rarity, '')
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"✅ Правильно! +{reward} балл{'' if reward == 1 else 'а'} {emoji}"
+        )
     else:
         stats = get_user_stats(chat_id)
         stats["score"] -= 1
         update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
         await context.bot.send_message(chat_id=chat_id, text="❌ Неправильно! –1 балл")
     
-    # Удаляем вопрос из контекста
     context.user_data.pop('quiz_question', None)
 
 # --- БЭКАПЫ ---
@@ -1320,7 +1367,7 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     stats = get_user_stats(chat_id)
     
-    # Сброс счётчика, если новый день
+    # Сброс счётчика
     if stats["last_play_date"] != today:
         stats["today_plays"] = 0
         stats["last_play_date"] = today
@@ -1331,10 +1378,10 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ты уже прошёл 5 викторин сегодня! Возвращайся завтра.")
         return
     
-    # Достаём случайный вопрос из базы
+    # Достаём случайный вопрос
     conn = sqlite3.connect(BASE_QUIZZES_DB)
     c = conn.cursor()
-    c.execute('SELECT question, options, correct_option_id FROM base_quizzes ORDER BY RANDOM() LIMIT 1')
+    c.execute('SELECT question, options, correct_option_id, rarity FROM base_quizzes ORDER BY RANDOM() LIMIT 1')
     row = c.fetchone()
     conn.close()
     
@@ -1342,19 +1389,24 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 В базе пока нет вопросов. Добавь их через /basequiz")
         return
     
-    question, options_raw, correct_option_id = row
+    question, options_raw, correct_option_id, rarity = row
     options = options_raw.split('|||') if options_raw else []
     
-    # Сохраняем вопрос в контекст
+    # Определяем награду
+    reward = RARITY_REWARDS.get(rarity, 1)
+    
+    # Сохраняем в контекст
     context.user_data['quiz_question'] = {
         "question": question,
         "options": options,
-        "correct_option_id": correct_option_id
+        "correct_option_id": correct_option_id,
+        "reward": reward,
+        "rarity": rarity
     }
     
     # Отправляем опрос
     await update.message.reply_poll(
-        question=question,
+        question=f"{RARITY_EMOJIS.get(rarity, '')}\n\n{question}",
         options=options,
         type="quiz",
         correct_option_id=correct_option_id,
@@ -1371,17 +1423,31 @@ async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = get_user_stats(chat_id)
     today = datetime.now().date().isoformat()
     
-    # Проверяем, нужно ли обновить дату
     if stats["last_play_date"] != today:
         remaining = 5
     else:
         remaining = 5 - stats["today_plays"]
     
+    # Считаем количество вопросов по редкости
+    conn = sqlite3.connect(BASE_QUIZZES_DB)
+    c = conn.cursor()
+    c.execute('''
+        SELECT rarity, COUNT(*) FROM base_quizzes GROUP BY rarity
+    ''')
+    rarity_counts = dict(c.fetchall())
+    conn.close()
+    
+    rarity_text = "\n".join([
+        f"{RARITY_EMOJI_ONLY.get(r, '')} {r}: {rarity_counts.get(r, 0)}" 
+        for r in ["common", "uncommon", "rare", "epic", "legendary"]
+    ])
+    
     await update.message.reply_text(
         f"📊 **Твоя статистика:**\n"
         f"🏆 Баллы: {stats['score']}\n"
         f"🎮 Осталось попыток сегодня: {remaining}/5\n"
-        f"📅 Обновлено: {stats['last_play_date'] if stats['last_play_date'] else '—'}"
+        f"📅 Обновлено: {stats['last_play_date'] if stats['last_play_date'] else '—'}\n\n"
+        f"📚 **Вопросы в базе:**\n{rarity_text}"
     )
 
 async def restore_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
