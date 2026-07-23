@@ -50,6 +50,23 @@ RARITY_EMOJI_ONLY = {
     "legendary": "🟧"
 }
 
+# --- РАНГИ ---
+RANKS = [
+    {"name": "Новичок", "min_score": 0, "emoji": "🪴"},
+    {"name": "Знаток", "min_score": 10, "emoji": "📖"},
+    {"name": "Эрудит", "min_score": 25, "emoji": "🧠"},
+    {"name": "Мастер", "min_score": 50, "emoji": "🎯"},
+    {"name": "Гений", "min_score": 100, "emoji": "💎"},
+    {"name": "Легенда", "min_score": 200, "emoji": "👑"},
+]
+
+def get_rank(score):
+    """Возвращает ранг по количеству баллов"""
+    for rank in reversed(RANKS):
+        if score >= rank["min_score"]:
+            return rank
+    return RANKS[0]
+
 # --- БАЗА ДАННЫХ ---
 def init_db():
     conn = sqlite3.connect(QUIZZES_DB)
@@ -886,21 +903,29 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     if poll_answer.option_ids[0] == quiz_data['correct_option_id']:
         stats = get_user_stats(chat_id)
+        old_rank = get_rank(stats["score"])
         stats["score"] += reward
+        new_rank = get_rank(stats["score"])
         update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
         
         emoji = RARITY_EMOJI_ONLY.get(rarity, '')
+        
+        # Проверяем, повысился ли ранг
+        rank_up_msg = ""
+        if new_rank["min_score"] > old_rank["min_score"]:
+            rank_up_msg = f"\n\n🎉 **ПОВЫШЕНИЕ РАНГА!**\n{old_rank['emoji']} {old_rank['name']} → {new_rank['emoji']} {new_rank['name']}"
+        
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"✅ Правильно! +{reward} балл{'' if reward == 1 else 'а'} {emoji}"
+            text=f"✅ Правильно! +{reward} балл{'' if reward == 1 else 'а'} {emoji}{rank_up_msg}"
         )
     else:
         stats = get_user_stats(chat_id)
         stats["score"] -= 1
         update_user_stats(chat_id, stats["score"], stats["today_plays"], datetime.now().date().isoformat())
         await context.bot.send_message(chat_id=chat_id, text="❌ Неправильно! –1 балл")
-        
-    # --- ОТМЕЧАЕМ ВОПРОС КАК ПРОЙДЕННЫЙ ---
+    
+    # Отмечаем вопрос как пройденный
     mark_question_as_played(chat_id, quiz_data.get('question_id'))
     
     context.user_data.pop('quiz_question', None)
@@ -1423,6 +1448,15 @@ async def quiz_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ты уже прошёл 5 викторин сегодня! Возвращайся завтра.")
         return
     
+    # --- ПОКАЗЫВАЕМ ТЕКУЩИЙ РАНГ ---
+    rank = get_rank(stats["score"])
+    await update.message.reply_text(
+        f"🎯 **Начинаем викторину!**\n\n"
+        f"🏆 Твои баллы: {stats['score']}\n"
+        f"🎖️ Твой ранг: {rank['emoji']} {rank['name']}\n"
+        f"🎮 Осталось попыток: {5 - stats['today_plays']}\n"
+    )
+    
     # --- ПОЛУЧАЕМ ID ВОПРОСОВ, КОТОРЫЕ УЖЕ ПРОЙДЕНЫ ---
     played_ids = get_played_question_ids(chat_id)
     
@@ -1482,12 +1516,12 @@ async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         remaining = 5 - stats["today_plays"]
     
+    rank = get_rank(stats["score"])
+    
     # Считаем количество вопросов по редкости
     conn = sqlite3.connect(BASE_QUIZZES_DB)
     c = conn.cursor()
-    c.execute('''
-        SELECT rarity, COUNT(*) FROM base_quizzes GROUP BY rarity
-    ''')
+    c.execute('SELECT rarity, COUNT(*) FROM base_quizzes GROUP BY rarity')
     rarity_counts = dict(c.fetchall())
     conn.close()
     
@@ -1499,11 +1533,11 @@ async def quiz_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"📊 **Твоя статистика:**\n"
         f"🏆 Баллы: {stats['score']}\n"
+        f"🎖️ Ранг: {rank['emoji']} {rank['name']}\n"
         f"🎮 Осталось попыток сегодня: {remaining}/5\n"
         f"📅 Обновлено: {stats['last_play_date'] if stats['last_play_date'] else '—'}\n\n"
         f"📚 **Вопросы в базе:**\n{rarity_text}"
     )
-
 async def restore_base_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /restorebase — загрузить бэкап базы вопросов"""
 
